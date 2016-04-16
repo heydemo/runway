@@ -1,14 +1,19 @@
 import t from 'tcomb';
 import { toObject } from 'tcomb-doc';
+import generateId from './idGenerator';
 
 function now() {
   return Math.round(new Date() / 1000)
 }
 
 export default function Model(attributes, options) {
-  let defaults = { updateTime: t.Number, createTime: t.Number, class_name: t.String };
-  attributes = Object.assign({}, defaults, attributes);
+  let locked_fields = { updateTime: t.Number, createTime: t.Number, class_name: t.String };
+  attributes = Object.assign({}, attributes, locked_fields);
   var model = t.struct(attributes, options.name);
+
+  if (!options.index) {
+    throw new Error('You must provide an index key in options object sent to Model');
+  }
 
   let prohibited_update_keys = options.prohibited_update_keys || [];
   if (options.index) {
@@ -22,11 +27,16 @@ export default function Model(attributes, options) {
     return model.update(this, commands);
   }
   let RecordClass = function(attrs) {
-    var attrs_with_defaults = Object.assign({}, { class_name: options.name, createTime: now(), updateTime: now() }, attrs);
+    let index = generateId();
+    var attrs_with_defaults = Object.assign({}, { [options.index]: index, class_name: options.name, createTime: now(), updateTime: now() }, attrs);
     return model(attrs_with_defaults);
   }
   RecordClass.sql = { sql_index: options.index };
   RecordClass._name = options.name;
+
+  RecordClass.getDefinition = function() {
+    return toObject(model);
+  }
 
   return RecordClass;
 

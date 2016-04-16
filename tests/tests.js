@@ -4,8 +4,6 @@ import t from 'tcomb';
 
 import getDatabase from '../src/database.js';
 import { Model } from '../src/index.js';
-console.log('MODEL IS ');
-console.log(Model);
 
 let skip = () => {};
 
@@ -14,15 +12,12 @@ describe('runway', function() {
     const Exercise = getTestRecordClass();    
     var runway = new Runway('tester');
     runway.registerRecordClass(Exercise, 'Exercise');
-    console.log('SQL');
-    console.log(Exercise.sql);
 
-    //let sql = runway.getCreateTableSql(Exercise, 'Exercise');
-    //let expected_sql = "CREATE TABLE IF NOT EXISTS exercise (bliss_id TEXT, responses TEXT, createTime Integer, updateTime Integer)";
-    //expect(sql).to.equal(expected_sql);
-    //runway.createTable(Exercise);
+    let sql = runway.getCreateTableSql(Exercise, 'Exercise');
+    let expected_sql = "CREATE TABLE IF NOT EXISTS exercise (bliss_id TEXT, responses TEXT, createTime Integer, updateTime Integer)";
+    expect(sql).to.equal(expected_sql);
+    runway.createTable(Exercise);
   });
-  /*
   it('Should get field definitions for a record class', function() {
     var runway = new Runway('tester');
     const Exercise = getTestRecordClass();    
@@ -115,21 +110,59 @@ describe('runway', function() {
     })
     .catch(logTestError('Save / Retrieve'));  
   });
-*/
+  it('Should allow subscribing to Record Class updated', function(done) {
+    var runway = new Runway('tester');
+    let times_called = 0;
+    runway.subscribe('Exercise', () => {
+      times_called++; 
+    });
+    let Exercise = getTestRecordClass();
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blah blah' } ], createTime: 0, updateTime: 0 }); 
+    runway.registerRecordClass(Exercise)
+    .then(() => {
+      return runway.saveRecord(test_exercise, 'Exercise');
+    })
+    .then(() => {
+      expect(times_called).to.equal(1);
+      done();
+    })
+    .catch(logTestError('Subscribe to RecordClass'));  
 
+  });
 
 
 });
 
+describe('Record', function() {
+  it('Should create an immutable object', () => {
+    let Exercise = getTestRecordClass();
+    let exercise = new Exercise({ responses: [] });
+    expect(exercise.responses).to.deep.equal([]);
+  });
+  it('Should allow fields to be changed', () => {
+    let Exercise = getTestRecordClass();
+    let exercise = new Exercise({ responses: [] });
+    let modified_exercise = exercise.set('responses', [ { cool: 'beans' } ]);
+    expect(modified_exercise.responses).to.deep.equal([ { cool: 'beans' } ]);
+  });
+  it('Should throw an error if we attempt to change the index key of a record', () => {
+    let Exercise = getTestRecordClass();
+    let exercise = new Exercise({ responses: [] });
+
+    expect(() => {
+      exercise.set('bliss_id', 'funstuff');
+    }).to.throw(Error);
+
+  });
+});
+
 function getTestRecordClass() {
-  let m = new Model({
+  let m = Model({
       bliss_id:  t.String,
       responses: t.list(t.Object),
       createTime: t.Number,
       updateTime: t.Number,
     }, { name: 'Exercise', index: 'bliss_id'});
-
-    console.log(m);
 
     return m;
 }

@@ -11,4 +11,6 @@ export default function generateId() {
   return text;
 }
 
-window.generateId = generateId;
+if (typeof(window) != 'undefined') {
+  window.generateId = generateId;
+}

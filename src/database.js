@@ -1,7 +1,6 @@
 import webSqlPromise from 'websql-promisified';
 
 export default function getDatabase(name) {
-  console.log(`DATABASE NAME: ${name}`);
   var openDatabaseFunction;
   //Built in Web SQL
   if (typeof(openDatabase) != 'undefined') {

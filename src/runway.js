@@ -11,6 +11,7 @@ export default class RunWay {
     this.name = name;
     this._db = getDatabase(name);
     this._RecordClasses = {};
+    this._subscribers = {};
   }
   executeSql(sql, args = []) {
     return this._db.transaction((tx) => tx.executeSql(sql, args));
@@ -42,6 +43,9 @@ export default class RunWay {
     .then((exists) => {
       return exists ? this.insertRecord(Record, RecordClassName) : this.updateRecord(Record, RecordClassName);
     })
+    .then(() => {
+      return this.updateSubscribers(RecordClassName);
+    });
   }
   insertRecord(Record, RecordClassName) {
     let sql = this.getInsertRecordSql(Record, RecordClassName);
@@ -130,25 +134,29 @@ export default class RunWay {
     return RecordClass;
   }
   getRecordClassIndex(RecordClass) {
-    let index = RecordClass.sql.sql_key; 
+    let index = RecordClass.sql.sql_index; 
     return index;
   }
   getCreateTableSql(RecordClass) {
     if (!RecordClass) {
       throw new Error('No RecordClass provided as first arg of getCreateTableSql');
     }
-    console.log('RECORD CLASS');
-    console.log(RecordClass.toString());
     let RecordClassName = this.getRecordClassName(RecordClass);
-    let definition = toObject(RecordClass);
-    let fields = definition.props;
+    let fields = this.getFields(RecordClass);
+    let field_keys = Object.keys(fields);//.sort();
     let parsed_fields = [];
-    Object.keys(fields).forEach((field_name) => {
+    field_keys.forEach((field_name) => {
       let field = fields[field_name];
       parsed_fields.push(this.getFieldSql(field_name, field));
     });
     let fields_sql = parsed_fields.join(', ');
     return `CREATE TABLE IF NOT EXISTS ${RecordClassName.toLowerCase()} (${fields_sql})`;
+  }
+  getFields(RecordClass) {
+    let definition = RecordClass.getDefinition();
+    let fields = definition.props;
+    delete fields.class_name;
+    return fields;
   }
   getRecordExistsSql(Record, RecordClassName) {
     let RecordClass = this.getRecordClassByName(RecordClassName);
@@ -226,14 +234,13 @@ export default class RunWay {
     if (!RecordClass) {
       throw new Error('No RecordClass provided as first arg of getRecordClassJSFieldTypes');
     }
-    let definition = toObject(RecordClass);
-    let props = definition.props;
-    let fields = {};
-    Object.keys(props).forEach((field_name) => {
-      let field = props[field_name];
-      fields[field_name] = this.getJSFieldType(field);
+    let fields = this.getFields(RecordClass);
+    let js_field_types = {};
+    Object.keys(fields).forEach((field_name) => {
+      let field = fields[field_name];
+      js_field_types[field_name] = this.getJSFieldType(field);
     });
-    return fields;
+    return js_field_types;
   }
   /**
    * Get array of field values formatted for SQL
@@ -244,7 +251,8 @@ export default class RunWay {
   getRecordFieldValuesForSql(Record, RecordClass) {
     let field_values = {};
     let field_types = this.getRecordClassJSFieldTypes(RecordClass);
-    Object.keys(Record).forEach((field_name) => {
+    let field_keys = Object.keys(Record).filter(key => key != 'class_name');
+    field_keys.forEach((field_name) => {
       let type  = field_types[field_name];
       let value = this.formatFieldValueForSql(Record[field_name], type);
       field_values[field_name] = value;
@@ -267,5 +275,15 @@ export default class RunWay {
         throw new Error(`Unknown type '${type}' sent to formatFieldValueForSql`);
 
     }
+  }
+  subscribe(RecordClassName, callback) {
+    this._subscribers[RecordClassName] || (this._subscribers[RecordClassName] = []);
+    this._subscribers[RecordClassName].push(callback);
+  }
+  updateSubscribers(RecordClassName) {
+    let subscribers = this._subscribers[RecordClassName] || [];
+    subscribers.forEach((subscriber) => {
+      subscriber();
+    });
   }
 }
