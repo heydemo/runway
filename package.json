@@ -1,9 +1,11 @@
 {
   "name": "@heydemo/runway",
-  "version": "1.0.2",
+  "version": "1.0.10",
   "description": "",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "scripts": {
+    "prepublish": "npm run build",
+    "build": "mkdir dist -p; rm dist/*; babel -d dist/ src/",
     "test": "mocha tests/* -w --compilers js:babel-core/register",
     "start": "node server.js",
     "flow": "flow; test $? -eq 0 -o $? -eq 2",
@@ -18,7 +20,7 @@
     "tcomb": "3.0.0",
     "tcomb-doc": "0.5.0",
     "websql": "0.4.3",
-    "websql-promisified": "1.0.3"
+    "websql-promise": "1.0.2"
   },
   "devDependencies": {
     "babel": "6.5.2",

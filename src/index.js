@@ -1,6 +1,2 @@
-import Runway from './runway';
-
-export default Runway;
-
-let m = require('./Model');
-export const Model = m.default;
+export { default as Runway } from './runway';
+export { default as Model } from './Model';

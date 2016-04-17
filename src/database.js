@@ -1,4 +1,4 @@
-import webSqlPromise from 'websql-promisified';
+import webSqlPromise from 'websql-promise';
 
 export default function getDatabase(name) {
   var openDatabaseFunction;
@@ -11,5 +11,5 @@ export default function getDatabase(name) {
     openDatabaseFunction = require('websql');
   }
   var db = openDatabaseFunction(name, "1.0", "Runway Database", 50000);
-  return webSqlPromise(db);
+  return new webSqlPromise(db);
 }

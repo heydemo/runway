@@ -2,3 +2,6 @@
 bundle
 node_modules
 build
+tester
+dist
+npm-debug.log
