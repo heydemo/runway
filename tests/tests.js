@@ -1,9 +1,8 @@
 var expect = require('chai').expect;
-import Runway from '../src/index.js';
 import t from 'tcomb';
 
 import getDatabase from '../src/database.js';
-import { Model } from '../src/index.js';
+import { Runway, Model } from '../src/index.js';
 
 let skip = () => {};
 
@@ -14,7 +13,7 @@ describe('runway', function() {
     runway.registerRecordClass(Exercise, 'Exercise');
 
     let sql = runway.getCreateTableSql(Exercise, 'Exercise');
-    let expected_sql = "CREATE TABLE IF NOT EXISTS exercise (bliss_id TEXT, responses TEXT, createTime Integer, updateTime Integer)";
+    let expected_sql = "CREATE TABLE IF NOT EXISTS exercise (bliss_id TEXT, responses TEXT, createTime Integer, updateTime Integer, PRIMARY KEY (bliss_id))";
     expect(sql).to.equal(expected_sql);
     runway.createTable(Exercise);
   });
@@ -95,7 +94,7 @@ describe('runway', function() {
   it('Should save / retrieve records', function(done) {
     var runway = new Runway('tester');
     const Exercise = getTestRecordClass();    
-    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blah blah' } ], createTime: 0, updateTime: 0 }); 
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah blah, ain't no thang" } ], createTime: 0, updateTime: 0 }); 
 
     runway.registerRecordClass(Exercise, { sql_key: 'bliss_id' })
     .then(() => {
@@ -105,10 +104,52 @@ describe('runway', function() {
       return runway.findRecords({ bliss_id: 'abc' }, 'Exercise');
     })
     .then((records) => {
+      expect(typeof(records[0])).to.equal('object');
       expect(records[0].responses).to.deep.equal(test_exercise.responses); 
       done();
     })
     .catch(logTestError('Save / Retrieve'));  
+  });
+  it('Should delete the database', function(done) {
+    var runway = new Runway('tester');
+    const Exercise = getTestRecordClass();    
+    runway.registerRecordClass(Exercise, { sql_key: 'bliss_id' })
+    .then(() => {
+      runway.clear()
+    })
+    .then(() => {
+      return runway.executeSql('SELECT tbl_name from sqlite_master')
+    })
+    .then((result) => {
+      expect(result.rows.length).to.equal(0);
+      done();
+    })
+    .catch(logTestError('Delete database'));  
+
+  });
+  it('Should update an existing record correctly', function(done) {
+    var runway = new Runway('update_record_test');
+    const Exercise = getTestRecordClass();    
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah doesn't matter blah" } ], createTime: 0, updateTime: 0 }); 
+    var updated_exercise;
+    runway.registerRecordClass(Exercise, { sql_key: 'bliss_id' })
+    .then(() => {
+      return runway.saveRecord(test_exercise, 'Exercise');
+    })
+    .then(() => {
+      updated_exercise = test_exercise.set('responses', [{ updated: 'it is true' }]); 
+      return runway.saveRecord(updated_exercise, 'Exercise');
+    })
+    .then(() => {
+      return runway.findRecords({ bliss_id: 'abc' }, 'Exercise');
+    })
+    .then((records) => {
+      expect(typeof(records[0])).to.equal('object');
+      expect(records[0].responses).to.deep.equal(updated_exercise.responses); 
+      done();
+    })
+    .catch(logTestError('Update existing'));  
+
   });
   it('Should allow subscribing to Record Class updated', function(done) {
     var runway = new Runway('tester');
@@ -171,5 +212,6 @@ function logTestError(test_description) {
   return (error) => {
     console.log(`Error in ${test_description}`);
     console.log(error);
+    return error;
   }
 }

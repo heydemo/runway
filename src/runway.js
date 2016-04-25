@@ -3,6 +3,7 @@
 import t from 'tcomb';
 import { toObject } from 'tcomb-doc';
 import objectValues from 'object-values';
+import Q from 'q';
 
 import getDatabase from './database.js';
 
@@ -14,7 +15,20 @@ export default class RunWay {
     this._subscribers = {};
   }
   executeSql(sql, args = []) {
-    return this._db.transaction((tx) => tx.executeSql(sql, args));
+    return this._db.executeSql(sql, args)
+    .catch((error) => {
+      console.log(`SQL ERROR ${error.message}`);
+      console.log(sql);
+      console.log(error);
+    });
+  }
+  clear() {
+    let table_names = Object.keys(this._RecordClasses);
+    let promises = [];
+    table_names.forEach((table_name) => {
+      promises.push(this.executeSql(`DROP TABLE ${table_name}`));
+    });
+    return Q.all(promises);
   }
   getRecordClassName(RecordClass) {
     return RecordClass._name;
@@ -41,7 +55,7 @@ export default class RunWay {
     let index_value = this.getRecordIndexValue(Record, RecordClassName);
     return this.exists(index_value, RecordClassName)
     .then((exists) => {
-      return exists ? this.insertRecord(Record, RecordClassName) : this.updateRecord(Record, RecordClassName);
+      return exists ? this.updateRecord(Record, RecordClassName) : this.insertRecord(Record, RecordClassName);
     })
     .then(() => {
       return this.updateSubscribers(RecordClassName);
@@ -59,9 +73,16 @@ export default class RunWay {
     let sql = this.getFindRecordSql(fields, RecordClassName);
     return this.executeSql(sql)
     .then((result) => {
-      return result[0].rows._array.map((row) => {
+      let rows = getSqlResultRows(result);
+      return rows.map((row) => {
         return this.unpackRecord(row, RecordClassName);
       });
+    });
+  }
+  findRecord(fields, RecordClassName) {
+    return this.findRecords(fields, RecordClassName)
+    .then((records) => {
+      return records[0];
     });
   }
   getRecordIndexValue(Record, RecordClassName) {
@@ -80,6 +101,7 @@ export default class RunWay {
       switch (type) {
         case 'object':
           value = JSON.parse(record[field_name]);
+          //value = [{}];
           break;
         case 'string':
           value = record[field_name];
@@ -149,6 +171,9 @@ export default class RunWay {
       let field = fields[field_name];
       parsed_fields.push(this.getFieldSql(field_name, field));
     });
+    let primary_key = this.getRecordClassIndex(RecordClass);
+    let primary_key_sql = `PRIMARY KEY (${primary_key})`;
+    parsed_fields.push(primary_key_sql);
     let fields_sql = parsed_fields.join(', ');
     return `CREATE TABLE IF NOT EXISTS ${RecordClassName.toLowerCase()} (${fields_sql})`;
   }
@@ -222,9 +247,21 @@ export default class RunWay {
       let where_sql_statement = `${field_name} = ${field_value}`;
       where_sql_statements.push(where_sql_statement);
     });
-    let where_sql = where_sql_statements.join(' AND ');
-    let sql = `SELECT * FROM ${RecordClassName} WHERE ${where_sql}`;
+    let where_sql = '';
+    if (where_sql_statements.length > 0) {
+      where_sql = 'WHERE ' + where_sql_statements.join(' AND ');
+    }
+    let sql = `SELECT * FROM ${RecordClassName} ${where_sql}`;
     return sql;
+  }
+  escape(value) {
+    if (typeof(value) == 'string') {
+      //Replace single quote with two single quotes
+      return value.replace(new RegExp("'", 'g'), "''");
+    }
+    else {
+      return value;
+    }
   }
   /**
    * Get Javascript type of each Record Class field
@@ -263,13 +300,13 @@ export default class RunWay {
   formatFieldValueForSql(value, type) {
     switch (type) {
       case 'string':
-        return "'" + value + "'";
+        return "'" + this.escape(value) + "'";
         break;
       case 'number':
         return value;
         break;
       case 'object':
-        return "'" + JSON.stringify(value) + "'";
+        return "'" + this.escape(JSON.stringify(value)) + "'";
         break;
       default:
         throw new Error(`Unknown type '${type}' sent to formatFieldValueForSql`);
@@ -277,13 +314,36 @@ export default class RunWay {
     }
   }
   subscribe(RecordClassName, callback) {
+    if (!RecordClassName || !callback) {
+      throw new Error('runway.subscribe requires a RecordClassName and callback as first and second args');
+    }
     this._subscribers[RecordClassName] || (this._subscribers[RecordClassName] = []);
     this._subscribers[RecordClassName].push(callback);
   }
   updateSubscribers(RecordClassName) {
     let subscribers = this._subscribers[RecordClassName] || [];
-    subscribers.forEach((subscriber) => {
+    let global_subscribers = this._subscribers['all'] || [];
+    subscribers.concat(global_subscribers).forEach((subscriber) => {
       subscriber();
     });
   }
+}
+
+function getSqlResultRows(result) {
+  let sql_rows, return_rows = [];
+  if (result) {
+    if (result.rows && result.rows._array) {
+      sql_rows = result.rows._array;
+    }
+    else if (result.rows.length) {
+      sql_rows = result.rows;
+    }
+  }
+
+  if (sql_rows) {
+    for (var count = 0; count < sql_rows.length; count++) {
+      return_rows.push(sql_rows[String(count)]);
+    }
+  }
+  return return_rows;
 }
