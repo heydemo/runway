@@ -4,6 +4,11 @@ import t from 'tcomb';
 import { toObject } from 'tcomb-doc';
 import objectValues from 'object-values';
 import Q from 'q';
+import generateId from './idGenerator';
+
+if (typeof(window) != 'undefined') {
+  window.generateId = generateId;
+}
 
 import getDatabase from './database.js';
 
@@ -16,17 +21,21 @@ export default class RunWay {
   }
   executeSql(sql, args = []) {
     return this._db.executeSql(sql, args)
-    .catch((error) => {
+    .then((result) => {
+      return this.getSqlResultRows(result);
+    })
+    .catch(function(error) {
       console.log(`SQL ERROR ${error.message}`);
       console.log(sql);
       console.log(error);
+      console.log(arguments);
     });
   }
   clear() {
     let table_names = Object.keys(this._RecordClasses);
     let promises = [];
     table_names.forEach((table_name) => {
-      promises.push(this.executeSql(`DROP TABLE ${table_name}`));
+      promises.push(this.executeSql(`DROP TABLE IF EXISTS ${table_name}`));
     });
     return Q.all(promises);
   }
@@ -38,28 +47,49 @@ export default class RunWay {
     this._RecordClasses[name] = RecordClass;
     return this.createTable(RecordClass)
   }
+  getRecordClasses() {
+    return this._RecordClasses;
+  }
   createTable(RecordClass) {
-    let sql = this.getCreateTableSql(RecordClass);
-    return this.executeSql(sql);
+    let create_table_sql = this.getCreateTableSql(RecordClass);
+    let RecordClassName = this.getRecordClassName(RecordClass);
+    let index_key = this.getRecordClassIndex(RecordClass);
+    let promises = [];
+    promises.push(this.executeSql(create_table_sql));
+    promises.push(`CREATE INDEX IF NOT EXISTS updateTime ON ${RecordClassName} (updateTime)`);
+    promises.push(`CREATE INDEX IF NOT EXISTS bliss_id ON ${RecordClassName} (${index_key})`);
+    promises.push(`CREATE INDEX IF NOT EXISTS deleted ON ${RecordClassName} (deleted)`);
+    promises.push(`CREATE INDEX IF NOT EXISTS synced ON ${RecordClassName} (synced)`);
+
+    return Q.all(promises);
   }
   exists(index_value, RecordClassName) {
     let RecordClass = this.getRecordClassByName(RecordClassName);
     let index_key = this.getRecordClassIndex(RecordClass);
-    return this.findRecords({ [index_key]: index_value }, RecordClassName)
+    //use _findRecords to find even deleted records here
+    return this._findRecords({ [index_key]: index_value }, RecordClassName)
     .then((records) => {
       return records.length > 0;
     });
   }
-  saveRecord(Record, RecordClassName) {
+  saveRecord(Record, RecordClassName, update_version_ids = true) {
     let RecordClass = this.getRecordClassByName(RecordClassName);
     let index_value = this.getRecordIndexValue(Record, RecordClassName);
-    return this.exists(index_value, RecordClassName)
-    .then((exists) => {
-      return exists ? this.updateRecord(Record, RecordClassName) : this.insertRecord(Record, RecordClassName);
-    })
+    if (update_version_ids) {
+      let version_id = generateId();
+      Record = Record.set('version_id', version_id);
+    }
+    return this.insertRecord(Record, RecordClassName)
     .then(() => {
       return this.updateSubscribers(RecordClassName);
     });
+  }
+  saveRecords(Records, RecordClassName, update_version_ids = true) {
+    let promises = [];
+    Records.forEach((record) => {
+      promises.push(this.saveRecord(record, RecordClassName, update_version_ids));
+    })
+    return Q.all(promises);
   }
   insertRecord(Record, RecordClassName) {
     let sql = this.getInsertRecordSql(Record, RecordClassName);
@@ -69,15 +99,45 @@ export default class RunWay {
     let sql = this.getUpdateRecordSql(Record, RecordClassName);
     return this.executeSql(sql);
   }
+  deleteRecord(Record) {
+    let RecordClassName = Record.class_name;
+    let sql = this.getDeleteRecordSql(Record, RecordClassName);
+    return this.executeSql(sql)
+    .then(() => {
+      return this.updateSubscribers(RecordClassName);
+    });
+  }
   findRecords(fields, RecordClassName) {
+    //Screen out 'deleted' records
+    //We don't actually delete because we need to sync the deletion
+    let fields_with_delete = Object.assign({ deleted: 0 }, fields);
+    return this._findRecords(fields_with_delete, RecordClassName);
+  }
+  _findRecords(fields, RecordClassName) {
     let sql = this.getFindRecordSql(fields, RecordClassName);
     return this.executeSql(sql)
-    .then((result) => {
-      let rows = getSqlResultRows(result);
+    .then((rows) => {
       return rows.map((row) => {
         return this.unpackRecord(row, RecordClassName);
       });
     });
+  }
+  getSqlResultRows(result) {
+  let sql_rows, return_rows = [];
+    if (result) {
+      if (result.rows && result.rows._array) {
+        sql_rows = result.rows._array;
+      }
+      else if (result.rows.length) {
+        sql_rows = result.rows;
+      }
+    }
+    if (sql_rows) {
+      for (var count = 0; count < sql_rows.length; count++) {
+        return_rows.push(sql_rows[String(count)]);
+      }
+    }
+    return return_rows;
   }
   findRecord(fields, RecordClassName) {
     return this.findRecords(fields, RecordClassName)
@@ -96,6 +156,10 @@ export default class RunWay {
     let field_types = this.getRecordClassJSFieldTypes(RecordClass);
     let unpacked_field_values = {};
     Object.keys(field_types).forEach((field_name) => {
+      //Skip the internally used 'deleted' column
+      if (field_name == 'deleted') {
+        return;
+      }
       let type = field_types[field_name];
       let value;
       switch (type) {
@@ -133,6 +197,9 @@ export default class RunWay {
         case 'Number':
           return 'Integer';
           break;
+        case 'Object':
+          return 'TEXT';
+          break;
       }
 
     }
@@ -165,22 +232,22 @@ export default class RunWay {
     }
     let RecordClassName = this.getRecordClassName(RecordClass);
     let fields = this.getFields(RecordClass);
-    let field_keys = Object.keys(fields);//.sort();
+    let field_keys = Object.keys(fields);
     let parsed_fields = [];
     field_keys.forEach((field_name) => {
       let field = fields[field_name];
       parsed_fields.push(this.getFieldSql(field_name, field));
     });
-    let primary_key = this.getRecordClassIndex(RecordClass);
-    let primary_key_sql = `PRIMARY KEY (${primary_key})`;
-    parsed_fields.push(primary_key_sql);
+    parsed_fields.push('deleted INTEGER NOT NULL DEFAULT 0');
+    parsed_fields.push('synced INTEGER NOT NULL DEFAULT 0');
     let fields_sql = parsed_fields.join(', ');
-    return `CREATE TABLE IF NOT EXISTS ${RecordClassName.toLowerCase()} (${fields_sql})`;
+    return `CREATE TABLE IF NOT EXISTS ${RecordClassName} (${fields_sql})`;
   }
   getFields(RecordClass) {
     let definition = RecordClass.getDefinition();
     let fields = definition.props;
     delete fields.class_name;
+    delete fields.deleted;
     return fields;
   }
   getRecordExistsSql(Record, RecordClassName) {
@@ -194,9 +261,9 @@ export default class RunWay {
     }
     let RecordClass = this.getRecordClassByName(RecordClassName);
     let fields = this.getRecordClassJSFieldTypes(RecordClass);
-    let columns_sql = Object.keys(fields).join(', ');
     let field_values = this.getRecordFieldValuesForSql(Record, RecordClass)
     let field_values_sql = objectValues(field_values).join(', ');
+    let columns_sql = Object.keys(field_values).join(', ');
     let sql = `INSERT INTO ${RecordClassName} (${columns_sql}) VALUES (${field_values_sql})`;
     return sql;
   }
@@ -228,7 +295,7 @@ export default class RunWay {
     let index_key   = this.getRecordClassIndex(RecordClass);
     let field_values = this.getRecordFieldValuesForSql(Record, RecordClass);
     let index_value = field_values[index_key];
-    let sql = `DELETE FROM ${RecordClassName} WHERE ${index_key} = ${index_value}`;
+    let sql = `UPDATE ${RecordClassName} SET deleted = 1 WHERE ${index_key} = ${index_value}`;
     return sql;
   }
   /**
@@ -238,6 +305,11 @@ export default class RunWay {
    *
    */
   getFindRecordSql(fields, RecordClassName) {
+    let order_by_sql = '';
+    if (fields.orderBy) {
+      order_by_sql = this.getOrderBySql(fields.orderBy);  
+      delete fields.orderBy;
+    }
     let RecordClass = this.getRecordClassByName(RecordClassName);
     let index_key   = this.getRecordClassIndex(RecordClass);
     let field_values = this.getRecordFieldValuesForSql(fields, RecordClass);
@@ -251,7 +323,19 @@ export default class RunWay {
     if (where_sql_statements.length > 0) {
       where_sql = 'WHERE ' + where_sql_statements.join(' AND ');
     }
-    let sql = `SELECT * FROM ${RecordClassName} ${where_sql}`;
+    let select_sql  = this.getFieldsSelectSql(RecordClass);
+    let sql = `SELECT ${select_sql} FROM ${RecordClassName} ${where_sql} GROUP BY ${index_key} ${order_by_sql}`;
+    return sql;
+  }
+  getOrderBySql(order_by) {
+    let field     = order_by[0];
+    let direction = order_by[1];  //ASC of DESC 
+    return `ORDER BY ${field} ${direction}`;
+  }
+  getFieldsSelectSql(RecordClass) {
+    let fields = this.getFields(RecordClass);
+    delete fields.updateTime;
+    let sql = Object.keys(fields).join(', ') + ', max(updateTime) as updateTime';
     return sql;
   }
   escape(value) {
@@ -288,12 +372,15 @@ export default class RunWay {
   getRecordFieldValuesForSql(Record, RecordClass) {
     let field_values = {};
     let field_types = this.getRecordClassJSFieldTypes(RecordClass);
-    let field_keys = Object.keys(Record).filter(key => key != 'class_name');
+    let field_keys = Object.keys(Record).filter(key => key != 'class_name' && key != 'deleted');
     field_keys.forEach((field_name) => {
       let type  = field_types[field_name];
       let value = this.formatFieldValueForSql(Record[field_name], type);
       field_values[field_name] = value;
     });
+    if (typeof(Record.deleted) == 'number') {
+      field_values.deleted = Record.deleted;
+    }
 
     return field_values;
   }
@@ -329,21 +416,3 @@ export default class RunWay {
   }
 }
 
-function getSqlResultRows(result) {
-  let sql_rows, return_rows = [];
-  if (result) {
-    if (result.rows && result.rows._array) {
-      sql_rows = result.rows._array;
-    }
-    else if (result.rows.length) {
-      sql_rows = result.rows;
-    }
-  }
-
-  if (sql_rows) {
-    for (var count = 0; count < sql_rows.length; count++) {
-      return_rows.push(sql_rows[String(count)]);
-    }
-  }
-  return return_rows;
-}

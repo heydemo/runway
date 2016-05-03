@@ -3,11 +3,11 @@ import { toObject } from 'tcomb-doc';
 import generateId from './idGenerator';
 
 function now() {
-  return Math.round(new Date() / 1000)
+  return new Date() / 1000;
 }
 
 export default function Model(attributes, options) {
-  let locked_fields = { updateTime: t.Number, createTime: t.Number, class_name: t.String };
+  let locked_fields = { updateTime: t.Number, createTime: t.Number, class_name: t.String, version_id: t.maybe(t.String) };
   attributes = Object.assign({}, attributes, locked_fields);
   var model = t.struct(attributes, options.name);
 
@@ -28,7 +28,9 @@ export default function Model(attributes, options) {
   }
   let RecordClass = function(attrs) {
     let index = generateId();
-    var attrs_with_defaults = Object.assign({}, { [options.index]: index, class_name: options.name, createTime: now(), updateTime: now() }, attrs);
+    var attrs_with_defaults = Object.assign(
+      {}, 
+      { [options.index]: index, class_name: options.name, createTime: now(), updateTime: now() }, attrs);
     return model(attrs_with_defaults);
   }
   RecordClass.sql = { sql_index: options.index };
