@@ -25,28 +25,27 @@ export default function Model(attributes, options) {
     let commands = getUpdateCommands(key, value);
     validateUpdates(commands, prohibited_update_keys);
     return model.update(this, commands);
-  }
+  };
   let RecordClass = function(attrs) {
     let index = generateId();
     var attrs_with_defaults = Object.assign(
-      {}, 
+      {},
       { [options.index]: index, class_name: options.name, createTime: now(), updateTime: now() }, attrs);
     return model(attrs_with_defaults);
-  }
+  };
   RecordClass.sql = { sql_index: options.index };
   RecordClass._name = options.name;
 
   RecordClass.getDefinition = function() {
     return toObject(model);
-  }
+  };
 
   return RecordClass;
-
 }
 
 function getUpdateCommands(key, value) {
   let updateObj = key;
-  if (typeof(updateObj) != 'object') {
+  if (typeof updateObj !== 'object') {
     updateObj = { [key]: value };
   }
   let commands = {};
@@ -60,17 +59,8 @@ function getUpdateCommands(key, value) {
 
 function validateUpdates(commands, prohibited_update_keys) {
   Object.keys(commands).forEach((key) => {
-    if (prohibited_update_keys.indexOf(key) != -1) {
+    if (prohibited_update_keys.indexOf(key) !== -1) {
       throw new Error(`'${key}' is prohibited from being updated`);
     }
   });
 }
-
-function modelSet(key, value) {
-
-}
-
-var Exercise = Model({
-  bliss_id:  t.String,
-  responses: t.list(t.Object),
-}, { name: 'Exercise', index: 'bliss_id' });

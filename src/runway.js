@@ -196,8 +196,8 @@ export default class RunWay {
     let field_types = this.getRecordClassJSFieldTypes(RecordClass);
     let unpacked_field_values = {};
     Object.keys(field_types).forEach((field_name) => {
-      //Skip the internally used 'deleted' column
-      if (field_name == 'deleted') {
+      // Skip the internally used 'deleted' column
+      if (field_name === 'deleted') {
         return;
       }
       let type = field_types[field_name];
@@ -205,7 +205,6 @@ export default class RunWay {
       switch (type) {
         case 'object':
           value = JSON.parse(record[field_name]);
-          //value = [{}];
           break;
         case 'string':
           value = record[field_name];
@@ -234,25 +233,21 @@ export default class RunWay {
       switch (field.name) {
         case 'String':
           return 'TEXT';
-          break;
         case 'Number':
           return 'Integer';
-          break;
         case 'Object':
           return 'TEXT';
-          break;
       }
-
     }
   }
   getJSFieldType(field) {
-    if (field.kind == 'list' || field.name == 'Object') {
+    if (field.kind === 'list' || field.name === 'Object') {
       return 'object';
     }
-    else if (field.name == 'String') {
+    else if (field.name === 'String') {
       return 'string';
     }
-    else if (field.name == 'Number') {
+    else if (field.name === 'Number') {
       return 'number';
     }
   }
@@ -264,7 +259,7 @@ export default class RunWay {
     return RecordClass;
   }
   getRecordClassIndex(RecordClass) {
-    let index = RecordClass.sql.sql_index; 
+    let index = RecordClass.sql.sql_index;
     return index;
   }
   getCreateTableSql(RecordClass) {
@@ -282,8 +277,7 @@ export default class RunWay {
     parsed_fields.unshift('_id INTEGER PRIMARY KEY AUTOINCREMENT');
     parsed_fields.push('deleted INTEGER NOT NULL DEFAULT 0');
     parsed_fields.push('synced INTEGER NOT NULL DEFAULT 0');
-    parsed_fields.push(`user_id TEXT NOT NULL DEFAULT ''`);
-    let index_key   = this.getRecordClassIndex(RecordClass);
+    parsed_fields.push("user_id TEXT NOT NULL DEFAULT ''");
     let fields_sql = parsed_fields.join(', ');
     return `CREATE TABLE IF NOT EXISTS ${RecordClassName} (${fields_sql})`;
   }
@@ -304,7 +298,7 @@ export default class RunWay {
       throw new Error('RecordClassName not sent to getInsertRecordSql!');
     }
     let RecordClass = this.getRecordClassByName(RecordClassName);
-    let field_values = this.getRecordFieldValuesForSql(Record, RecordClass)
+    let field_values = this.getRecordFieldValuesForSql(Record, RecordClass);
     field_values.user_id = `'${this.getUserId()}'`;
     let field_values_sql = objectValues(field_values).join(', ');
     let columns_sql = Object.keys(field_values).join(', ');
@@ -323,7 +317,7 @@ export default class RunWay {
     let index_key   = this.getRecordClassIndex(RecordClass);
     let index_value = field_values[index_key];
 
-    //We can't update the index as we use it for targeting
+    // We can't update the index as we use it for targeting
     delete field_values[index_key];
     Object.keys(field_values).forEach((field_name) => {
       let field_value = field_values[field_name];
@@ -344,14 +338,14 @@ export default class RunWay {
   }
   /**
    * Get SQL for retrieving a record
-   * @param {Object} fields - columns to match on 
+   * @param {Object} fields - columns to match on
    * i.e. { id: 123, name: 'john' } => WHERE id = 123 AND name = 'john';
    *
    */
   getFindRecordSql(fields, RecordClassName) {
     let order_by_sql = '';
     if (fields.orderBy) {
-      order_by_sql = this.getOrderBySql(fields.orderBy);  
+      order_by_sql = this.getOrderBySql(fields.orderBy);
       delete fields.orderBy;
     }
     let RecordClass = this.getRecordClassByName(RecordClassName);
@@ -374,7 +368,7 @@ export default class RunWay {
   }
   getOrderBySql(order_by) {
     let field     = order_by[0];
-    let direction = order_by[1];  //ASC of DESC 
+    let direction = order_by[1];  // ASC of DESC
     return `ORDER BY ${field} ${direction}`;
   }
   getFieldsSelectSql(RecordClass) {
@@ -384,8 +378,8 @@ export default class RunWay {
     return sql;
   }
   escape(value) {
-    if (typeof(value) == 'string') {
-      //Replace single quote with two single quotes
+    if (typeof value === 'string') {
+      // Replace single quote with two single quotes
       return value.replace(new RegExp("'", 'g'), "''");
     }
     else {
@@ -417,13 +411,13 @@ export default class RunWay {
   getRecordFieldValuesForSql(Record, RecordClass) {
     let field_values = {};
     let field_types = this.getRecordClassJSFieldTypes(RecordClass);
-    let field_keys = Object.keys(Record).filter(key => key != 'class_name' && key != 'deleted');
+    let field_keys = Object.keys(Record).filter(key => key !== 'class_name' && key !== 'deleted');
     field_keys.forEach((field_name) => {
       let type  = field_types[field_name];
       let value = this.formatFieldValueForSql(Record[field_name], type);
       field_values[field_name] = value;
     });
-    if (typeof(Record.deleted) == 'number') {
+    if (typeof Record.deleted === 'number') {
       field_values.deleted = Record.deleted;
     }
 
@@ -433,16 +427,12 @@ export default class RunWay {
     switch (type) {
       case 'string':
         return "'" + this.escape(value) + "'";
-        break;
       case 'number':
         return value;
-        break;
       case 'object':
         return "'" + this.escape(JSON.stringify(value)) + "'";
-        break;
       default:
         throw new Error(`Unknown type '${type}' sent to formatFieldValueForSql`);
-
     }
   }
   subscribe(RecordClassName, callback) {
