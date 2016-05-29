@@ -64,6 +64,7 @@ export default class Syncer {
     }, this.retry_interval);
     }
     catch (e) {
+      console.log('sync up fail!');
       console.log(e);
     }
   }
@@ -95,8 +96,11 @@ export default class Syncer {
     .then((rows) => {
       rows.forEach((row) => {
         delete row.synced;
+        let user_id = row.user_id; 
         row = this.runway.unpackRecord(row, RecordClassName);
+        let attributes = Object.assign({}, row, { user_id });
         let parse_model = new ParseClass(row);
+        this.setUserAndAclOnParseModel(parse_model, user_id);
         parse_models.push(parse_model);
       });
       return this.parse.Object.saveAll(parse_models)
@@ -109,7 +113,26 @@ export default class Syncer {
           return this.markAsSynced(records, RecordClassName);
         }
       )
+    })
+    .catch((error) => {
+      console.log('ERROR in sync up');
+      console.log(error);
+      throw(error);
     });
+  }
+  setUserAndAclOnParseModel(parse_model, user_id) {
+    if (!typeof(user_id) == 'string') {
+      throw new Error('No user id for parse model');
+    }
+    parse_model.set('user_id', user_id);
+    var acl = new this.parse.ACL();
+    acl.setPublicWriteAccess(false);
+    acl.setPublicReadAccess(false);
+    acl.setReadAccess(user_id, true);
+    acl.setWriteAccess(user_id, true);
+
+    parse_model.setACL(acl);
+
   }
   parseModelToRecord(parse_model, RecordClass) {
     let obj = parse_model.toJSON();
@@ -143,8 +166,9 @@ export default class Syncer {
     .catch((e) => { console.log(e); });
   }
   syncDownClass(RecordClass, RecordClassName) {
+    let current_user = this.parse.User.current();
     let query = new this.parse.Query(RecordClassName);
-    let parse_model_promise = query.find();
+    let parse_model_promise = query.equalTo('user', current_user).find();
     let version_id_promise = this.getVersionIds(RecordClassName);
 
     return Q.all([parse_model_promise, version_id_promise])
@@ -163,3 +187,4 @@ export default class Syncer {
     });
   }
 }
+

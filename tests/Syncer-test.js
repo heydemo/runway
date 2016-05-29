@@ -4,6 +4,7 @@ import { Runway, Model, Syncer } from '../src/index.js';
 import sh from 'shelljs';
 import getTestRecordClass, { getTestRecords, logTestError } from './getTestRecordClass';
 import { getMockParseInterface } from './MockParse';
+import getTestDatabase from './getTestDatabase';
 import Parse from 'parse/node';
 import now from 'performance-now';
 
@@ -13,16 +14,13 @@ let skip = () => {};
 
 describe('Syncer', function(done) {
   var runway, RecordClass, MockParseInterface, syncer, test_records, test_count = 0;
-  before(() => {
-    sh.exec('rm -f sync_test*');
-  });
-  after(() => {
-    sh.exec('rm -f sync_test*');
-  });
 
   beforeEach(() => {
     test_count++;
-    runway = new Runway('sync_test_'+ test_count);
+    let name = 'sync_test_'+ test_count;
+    let db = getTestDatabase(name);
+    runway = new Runway(name, db);
+    runway.setUserId('test_user');
     RecordClass = getTestRecordClass();
     MockParseInterface = getMockParseInterface();
     syncer = new Syncer(runway, { parse: MockParseInterface });
@@ -33,6 +31,9 @@ describe('Syncer', function(done) {
       return deferred.promise;
     }
     return runway.registerRecordClass(RecordClass)
+    .then(() => {
+      return runway.setLoaded();
+    });
   });
 
   it('Should pass canary test', () => {
@@ -48,6 +49,7 @@ describe('Syncer', function(done) {
         expect(results_length).to.equal(3);
         expect(parse_models.map(model => model.className)).to.deep.equal(['Exercise', 'Exercise', 'Exercise']);
         expect(parse_models.map(model => model.synced)).to.deep.equal([undefined, undefined, undefined]);
+        expect(parse_models.map(model => model.get('user_id'))).to.deep.equal(['test_user', 'test_user', 'test_user']);
         done();
       }
       catch (e) {

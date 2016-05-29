@@ -1,10 +1,12 @@
 var expect = require('chai').expect;
 import t from 'tcomb';
 
-import getDatabase from '../src/database.js';
 import getTestRecordClass, { getTestRecords, logTestError } from './getTestRecordClass';
-import { Runway, Model } from '../src/index.js';
+import getTestDatabase from './getTestDatabase';
+import { Runway, Model } from '../src/index';
 import sh from 'shelljs';
+import Q from 'q';
+
 
 let skip = () => {};
 
@@ -13,14 +15,13 @@ describe('runway', function() {
   var db_count = 0;
   beforeEach(() => {
     Exercise = getTestRecordClass();
-    runway   = new Runway('tester_database' + db_count++);
-    return runway.registerRecordClass(Exercise, 'Exercise');
-  });
-  afterEach(() => {
-    //return runway.clear();
-  });
-  after(() => {
-    sh.exec('rm tester_database*');
+    let name = 'tester_database' + db_count++;
+    let db = getTestDatabase(':memory:');
+    runway   = new Runway(name, db);
+    return runway.registerRecordClass(Exercise, 'Exercise')
+    .then(() => {
+      return runway.setLoaded();
+    });
   });
 
   it('Should actually delete', function(done) {
@@ -87,6 +88,10 @@ describe('runway', function() {
       return runway.saveRecord(updated_exercise, 'Exercise');
     })
     .then(() => {
+      //In Memory is so fast records can have same update time, causing confusion
+      return Q.delay(10);
+    })
+    .then(() => {
       return runway.findRecords({ bliss_id: 'abc' }, 'Exercise');
     })
     .then((records) => {
@@ -110,6 +115,30 @@ describe('runway', function() {
     })
     .catch(logTestError('Subscribe to RecordClass'));  
   });
+  it('Should allow un-subscribing to Record Class updates', function(done) {
+    let times_called = 0;
+    let times_called_2 = 0;
+    runway.subscribe('Exercise', () => { times_called_2++ });
+    let unsubscribe = runway.subscribe('Exercise', () => {
+      times_called++; 
+    });
+    runway.subscribe('Exercise', () => {  } );
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blah blah' } ], createTime: 0, updateTime: 0 }); 
+    var test_exercise_2 = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blow blah' } ], createTime: 0, updateTime: 0 });  
+    runway.saveRecord(test_exercise, 'Exercise')
+    .then(() => {
+      expect(times_called).to.equal(1);
+      unsubscribe();
+      return runway.saveRecord(test_exercise_2, 'Exercise');
+    })
+    .then(() => {
+      expect(times_called).to.equal(1);
+      expect(times_called_2).to.equal(2);
+      done();
+    })
+    .catch(logTestError('Un-subscribe to RecordClass'));  
+
+  });
   it('Should update subscribers when a record is deleted', function(done) {
     let times_called = 0;
     runway.subscribe('Exercise', () => {
@@ -127,8 +156,30 @@ describe('runway', function() {
     })
     .catch(logTestError('Subscribe to RecordClass'));  
   });
-
-
+  it('Should only return records for the current user id', function(done) {
+    var test_exercise   = new Exercise({ bliss_id: 'abc', responses: [ { a: 'first_user' } ], createTime: 0, updateTime: 0 }); 
+    var test_exercise_2 = new Exercise({ bliss_id: 'abc', responses: [ { a: 'second_user' } ], createTime: 0, updateTime: 0 }); 
+    runway.saveRecord(test_exercise, 'Exercise')
+    .then(() => {
+      runway.setUserId('demo');
+      return runway.saveRecord(test_exercise_2, 'Exercise');
+    })
+    .then(() => {
+      return runway.findRecords({}, 'Exercise');
+    })
+    .then((records) => {
+      expect(records.length).to.equal(1);
+      expect(records[0].responses).to.deep.equal([ { a: 'second_user' } ]);
+      runway.setUserId('');
+      return runway.findRecords({}, 'Exercise');
+    })
+    .then((records) => {
+      expect(records.length).to.equal(1);
+      expect(records[0].responses).to.deep.equal([ { a: 'first_user' } ]);
+      done();
+    })
+    .catch(logTestError('User_id'));
+  });
 });
 
 describe('Record', function() {

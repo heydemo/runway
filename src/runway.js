@@ -1,23 +1,34 @@
-//@flow
-
-import t from 'tcomb';
-import { toObject } from 'tcomb-doc';
 import objectValues from 'object-values';
 import Q from 'q';
 import generateId from './idGenerator';
 
-if (typeof(window) != 'undefined') {
+if (typeof window !== 'undefined') {
   window.generateId = generateId;
 }
 
 import getDatabase from './database.js';
 
 export default class RunWay {
-  constructor(name) {
+  constructor(name, db = false, { user_id } = {}) {
     this.name = name;
-    this._db = getDatabase(name);
+    this._db = db || getDatabase(name);
     this._RecordClasses = {};
     this._subscribers = {};
+    this._load_deferred = Q.defer();
+    this._user_id = user_id || '';
+  }
+  getUserId() {
+    return this._user_id;
+  }
+  setUserId(user_id) {
+    this._user_id = user_id;
+  }
+  onLoad() {
+    return this._load_deferred.promise;
+  }
+  setLoaded() {
+    this._load_deferred.resolve();
+    return this._load_deferred;
   }
   executeSql(sql, args = []) {
     return this._db.executeSql(sql, args)
@@ -37,7 +48,13 @@ export default class RunWay {
     table_names.forEach((table_name) => {
       promises.push(this.executeSql(`DROP TABLE IF EXISTS ${table_name}`));
     });
-    return Q.all(promises);
+    return Q.all(promises)
+    .then(() => {
+      if (typeof localStorage !== 'undefined') {
+        // need to clear tables here
+        // localStorage.removeItem();
+      }
+    });
   }
   getRecordClassName(RecordClass) {
     return RecordClass._name;
@@ -45,7 +62,14 @@ export default class RunWay {
   registerRecordClass(RecordClass) {
     let name = this.getRecordClassName(RecordClass);
     this._RecordClasses[name] = RecordClass;
-    return this.createTable(RecordClass)
+    if (!this.tableCreated(name)) {
+      return this.createTable(RecordClass);
+    }
+    else {
+      let deferred = Q.defer();
+      deferred.resolve();
+      return deferred.promise;
+    }
   }
   getRecordClasses() {
     return this._RecordClasses;
@@ -56,25 +80,37 @@ export default class RunWay {
     let index_key = this.getRecordClassIndex(RecordClass);
     let promises = [];
     promises.push(this.executeSql(create_table_sql));
-    promises.push(`CREATE INDEX IF NOT EXISTS updateTime ON ${RecordClassName} (updateTime)`);
-    promises.push(`CREATE INDEX IF NOT EXISTS bliss_id ON ${RecordClassName} (${index_key})`);
-    promises.push(`CREATE INDEX IF NOT EXISTS deleted ON ${RecordClassName} (deleted)`);
-    promises.push(`CREATE INDEX IF NOT EXISTS synced ON ${RecordClassName} (synced)`);
+    promises.push(this.executeSql(`CREATE INDEX IF NOT EXISTS updateTime ON ${RecordClassName} (updateTime)`));
+    promises.push(this.executeSql(`CREATE INDEX IF NOT EXISTS bliss_id ON ${RecordClassName} (${index_key})`));
+    promises.push(this.executeSql(`CREATE INDEX IF NOT EXISTS deleted ON ${RecordClassName} (deleted)`));
+    promises.push(this.executeSql(`CREATE INDEX IF NOT EXISTS synced ON ${RecordClassName} (synced)`));
 
-    return Q.all(promises);
+    return Q.all(promises)
+    .then(() => {
+      this.setTableCreated(RecordClassName);
+    });
+  }
+  tableCreated(table_name) {
+    if (typeof localStorage !== 'undefined') {
+      return !!localStorage.getItem(`runway_${this.name}_${table_name}_table_created`);
+    }
+    return false;
+  }
+  setTableCreated(table_name) {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`runway_${this.name}_${table_name}_table_created`, true);
+    }
   }
   exists(index_value, RecordClassName) {
     let RecordClass = this.getRecordClassByName(RecordClassName);
     let index_key = this.getRecordClassIndex(RecordClass);
-    //use _findRecords to find even deleted records here
+    // use _findRecords to find even deleted records here
     return this._findRecords({ [index_key]: index_value }, RecordClassName)
     .then((records) => {
       return records.length > 0;
     });
   }
   saveRecord(Record, RecordClassName, update_version_ids = true) {
-    let RecordClass = this.getRecordClassByName(RecordClassName);
-    let index_value = this.getRecordIndexValue(Record, RecordClassName);
     if (update_version_ids) {
       let version_id = generateId();
       Record = Record.set('version_id', version_id);
@@ -88,7 +124,7 @@ export default class RunWay {
     let promises = [];
     Records.forEach((record) => {
       promises.push(this.saveRecord(record, RecordClassName, update_version_ids));
-    })
+    });
     return Q.all(promises);
   }
   insertRecord(Record, RecordClassName) {
@@ -99,8 +135,8 @@ export default class RunWay {
     let sql = this.getUpdateRecordSql(Record, RecordClassName);
     return this.executeSql(sql);
   }
-  deleteRecord(Record) {
-    let RecordClassName = Record.class_name;
+  deleteRecord(Record, RecordClassName) {
+    RecordClassName || (RecordClassName = Record.class_name);
     let sql = this.getDeleteRecordSql(Record, RecordClassName);
     return this.executeSql(sql)
     .then(() => {
@@ -108,10 +144,13 @@ export default class RunWay {
     });
   }
   findRecords(fields, RecordClassName) {
-    //Screen out 'deleted' records
-    //We don't actually delete because we need to sync the deletion
-    let fields_with_delete = Object.assign({ deleted: 0 }, fields);
-    return this._findRecords(fields_with_delete, RecordClassName);
+    // Screen out 'deleted' records
+    // We don't actually delete because we need to sync the deletion
+    let augmented_fields = Object.assign({ deleted: 0 }, fields);
+    return this.onLoad()
+    .then(() => {
+      return this._findRecords(augmented_fields, RecordClassName);
+    });
   }
   _findRecords(fields, RecordClassName) {
     let sql = this.getFindRecordSql(fields, RecordClassName);
@@ -123,7 +162,8 @@ export default class RunWay {
     });
   }
   getSqlResultRows(result) {
-  let sql_rows, return_rows = [];
+    let sql_rows;
+    let return_rows = [];
     if (result) {
       if (result.rows && result.rows._array) {
         sql_rows = result.rows._array;
@@ -240,6 +280,7 @@ export default class RunWay {
     });
     parsed_fields.push('deleted INTEGER NOT NULL DEFAULT 0');
     parsed_fields.push('synced INTEGER NOT NULL DEFAULT 0');
+    parsed_fields.push(`user_id TEXT NOT NULL DEFAULT ''`);
     let fields_sql = parsed_fields.join(', ');
     return `CREATE TABLE IF NOT EXISTS ${RecordClassName} (${fields_sql})`;
   }
@@ -260,8 +301,8 @@ export default class RunWay {
       throw new Error('RecordClassName not sent to getInsertRecordSql!');
     }
     let RecordClass = this.getRecordClassByName(RecordClassName);
-    let fields = this.getRecordClassJSFieldTypes(RecordClass);
     let field_values = this.getRecordFieldValuesForSql(Record, RecordClass)
+    field_values.user_id = `'${this.getUserId()}'`;
     let field_values_sql = objectValues(field_values).join(', ');
     let columns_sql = Object.keys(field_values).join(', ');
     let sql = `INSERT INTO ${RecordClassName} (${columns_sql}) VALUES (${field_values_sql})`;
@@ -319,6 +360,7 @@ export default class RunWay {
       let where_sql_statement = `${field_name} = ${field_value}`;
       where_sql_statements.push(where_sql_statement);
     });
+    where_sql_statements.push(`user_id = '${this.getUserId()}'`);
     let where_sql = '';
     if (where_sql_statements.length > 0) {
       where_sql = 'WHERE ' + where_sql_statements.join(' AND ');
@@ -406,6 +448,21 @@ export default class RunWay {
     }
     this._subscribers[RecordClassName] || (this._subscribers[RecordClassName] = []);
     this._subscribers[RecordClassName].push(callback);
+    return this.getUnsubscribeFunction(callback, RecordClassName);
+  }
+  getUnsubscribeFunction(callback, RecordClassName) {
+    let index = this._subscribers[RecordClassName].indexOf(callback);
+    let unsubscribe = () => {
+      this._subscribers[RecordClassName].splice(index, 1);
+    };
+    return unsubscribe.bind(this);
+  }
+  updateAllSubscribers() {
+    Object.keys(this._subscribers).forEach(
+      (RecordClassName) => {
+        this.updateSubscribers(RecordClassName);
+      }
+    );
   }
   updateSubscribers(RecordClassName) {
     let subscribers = this._subscribers[RecordClassName] || [];

@@ -2,8 +2,9 @@ import Q from 'q';
 import MockQueryResults from './MockQueryResults';
 var Parse = require('parse/node');
 
-class MockParseQuery {
-  constructor() {
+class MockParseQuery extends Parse.Query {
+  constructor(className) {
+    super(className);
   }
   find() {
     let deferred = Q.defer();
@@ -22,6 +23,7 @@ export function getMockParseInterface() {
         return Parse.Object.extend.apply(Parse, args);
       },
       saveAll: (parse_models) => {  
+        console.log('calling mock saveAll!');
         var deferred = Q.defer(); 
         deferred.resolve(parse_models);
         return deferred.promise;
@@ -31,8 +33,14 @@ export function getMockParseInterface() {
     User: {
       logIn: () => {},
       logOut: () => {},
-      signUp: () => {}
-    }
+      signUp: () => {},
+      current: () => {
+        return {
+          id: 'test_id',
+        }
+      }
+    },
+    ACL: Parse.ACL
 
   })
 }

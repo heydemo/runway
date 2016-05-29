@@ -27,6 +27,7 @@ export function logTestError(test_description) {
   return (error) => {
     console.log(`Error in ${test_description}`);
     console.log(error);
+    throw(error);
     return error;
   }
 }
