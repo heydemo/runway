@@ -223,13 +223,14 @@ export default class RunWay {
   }
   getFieldSql(field_name, field) {
     let sql_type = this.getSqlFieldType(field);
-    return `${field_name} ${sql_type}`;
+    let def = sql_type === 'Integer' ? 0 : "''";
+    return `${field_name} ${sql_type} NOT NULL DEFAULT ${def}`;
   }
   getSqlFieldType(field) {
-    if (field.kind == 'list') {
+    if (field.kind === 'list') {
       return 'TEXT';
     }
-    else if (field.kind == 'irreducible') {
+    else if (field.kind === 'irreducible') {
       switch (field.name) {
         case 'String':
           return 'TEXT';
@@ -278,9 +279,11 @@ export default class RunWay {
       let field = fields[field_name];
       parsed_fields.push(this.getFieldSql(field_name, field));
     });
+    parsed_fields.unshift('_id INTEGER PRIMARY KEY AUTOINCREMENT');
     parsed_fields.push('deleted INTEGER NOT NULL DEFAULT 0');
     parsed_fields.push('synced INTEGER NOT NULL DEFAULT 0');
     parsed_fields.push(`user_id TEXT NOT NULL DEFAULT ''`);
+    let index_key   = this.getRecordClassIndex(RecordClass);
     let fields_sql = parsed_fields.join(', ');
     return `CREATE TABLE IF NOT EXISTS ${RecordClassName} (${fields_sql})`;
   }
@@ -377,7 +380,7 @@ export default class RunWay {
   getFieldsSelectSql(RecordClass) {
     let fields = this.getFields(RecordClass);
     delete fields.updateTime;
-    let sql = Object.keys(fields).join(', ') + ', max(updateTime) as updateTime';
+    let sql = Object.keys(fields).join(', ') + ', updateTime, max(_id) as _id';
     return sql;
   }
   escape(value) {

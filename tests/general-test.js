@@ -1,23 +1,21 @@
 var expect = require('chai').expect;
-import t from 'tcomb';
-
 import getTestRecordClass, { getTestRecords, logTestError } from './getTestRecordClass';
 import getTestDatabase from './getTestDatabase';
-import { Runway, Model } from '../src/index';
-import sh from 'shelljs';
+import { Runway } from '../src/index';
 import Q from 'q';
-
+/* global describe beforeEach it */
 
 let skip = () => {};
 
 describe('runway', function() {
   var Exercise, runway;
   var db_count = 0;
+
   beforeEach(() => {
     Exercise = getTestRecordClass();
     let name = 'tester_database' + db_count++;
     let db = getTestDatabase(':memory:');
-    runway   = new Runway(name, db);
+    runway = new Runway(name, db);
     return runway.registerRecordClass(Exercise, 'Exercise')
     .then(() => {
       return runway.setLoaded();
@@ -25,7 +23,7 @@ describe('runway', function() {
   });
 
   it('Should actually delete', function(done) {
-    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah blah, ain't no thang" } ], createTime: 0, updateTime: 0 }); 
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah blah, ain't no thang" } ], createTime: 0, updateTime: 0 });
 
     runway.saveRecord(test_exercise, 'Exercise')
     .then(() => {
@@ -38,23 +36,24 @@ describe('runway', function() {
       expect(record).to.equal(undefined);
       done();
     })
-    .catch(logTestError('Delete Record'));  
-
+    .catch(logTestError('Delete Record'));
   });
+
   it('Should save / retrieve records', function(done) {
-    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah blah, ain't no thang" } ], createTime: 0, updateTime: 0 }); 
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah blah, ain't no thang" } ], createTime: 0, updateTime: 0 });
 
     runway.saveRecord(test_exercise, 'Exercise')
     .then(() => {
       return runway.findRecords({ bliss_id: 'abc' }, 'Exercise');
     })
     .then((records) => {
-      expect(typeof(records[0])).to.equal('object');
-      expect(records[0].responses).to.deep.equal(test_exercise.responses); 
+      expect(typeof (records[0])).to.equal('object');
+      expect(records[0].responses).to.deep.equal(test_exercise.responses);
       done();
     })
-    .catch(logTestError('Save / Retrieve'));  
+    .catch(logTestError('Save / Retrieve'));
   });
+
   it('Should save multiple records', function(done) {
     let records = getTestRecords();
     runway.saveRecords(records, 'Exercise')
@@ -65,66 +64,65 @@ describe('runway', function() {
       expect(records.length).to.equal(3);
       done();
     });
-
   });
+
   it('Should delete the database', function(done) {
     runway.clear()
     .then(() => {
-      return runway.executeSql('SELECT tbl_name from sqlite_master')
+      return runway.executeSql('SELECT tbl_name from sqlite_master');
     })
     .then((rows) => {
-      expect(rows.length).to.equal(0);
+      expect(rows.length).to.equal(1); 
       done();
     })
-    .catch(logTestError('Delete database'));  
-
+    .catch(logTestError('Delete database'));
   });
+
   it('Should update an existing record correctly', function(done) {
-    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah doesn't matter blah" } ], createTime: 0, updateTime: 0 }); 
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah doesn't matter blah" } ], createTime: 0, updateTime: 0 });
     var updated_exercise;
+    updated_exercise = test_exercise.set('responses', [{ updated: 'it is true' }]);
     runway.saveRecord(test_exercise, 'Exercise')
     .then(() => {
-      updated_exercise = test_exercise.set('responses', [{ updated: 'it is true' }]); 
       return runway.saveRecord(updated_exercise, 'Exercise');
-    })
-    .then(() => {
-      //In Memory is so fast records can have same update time, causing confusion
-      return Q.delay(10);
     })
     .then(() => {
       return runway.findRecords({ bliss_id: 'abc' }, 'Exercise');
     })
     .then((records) => {
-      expect(typeof(records[0])).to.equal('object');
-      expect(records[0].responses).to.deep.equal(updated_exercise.responses); 
+      expect(typeof (records[0])).to.equal('object');
+      expect(records[0].responses).to.deep.equal(updated_exercise.responses);
       done();
     })
-    .catch(logTestError('Update existing'));  
-
+    .catch(logTestError('Update existing'));
   });
+
   it('Should allow subscribing to Record Class updated', function(done) {
     let times_called = 0;
     runway.subscribe('Exercise', () => {
-      times_called++; 
+      times_called++;
     });
-    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blah blah' } ], createTime: 0, updateTime: 0 }); 
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blah blah' } ], createTime: 0, updateTime: 0 });
     runway.saveRecord(test_exercise, 'Exercise')
     .then(() => {
       expect(times_called).to.equal(1);
       done();
     })
-    .catch(logTestError('Subscribe to RecordClass'));  
+    .catch(logTestError('Subscribe to RecordClass'));
   });
+
   it('Should allow un-subscribing to Record Class updates', function(done) {
     let times_called = 0;
     let times_called_2 = 0;
-    runway.subscribe('Exercise', () => { times_called_2++ });
-    let unsubscribe = runway.subscribe('Exercise', () => {
-      times_called++; 
+    runway.subscribe('Exercise', () => {
+      times_called_2++;
     });
-    runway.subscribe('Exercise', () => {  } );
-    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blah blah' } ], createTime: 0, updateTime: 0 }); 
-    var test_exercise_2 = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blow blah' } ], createTime: 0, updateTime: 0 });  
+    let unsubscribe = runway.subscribe('Exercise', () => {
+      times_called++;
+    });
+    runway.subscribe('Exercise', () => { });
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blah blah' } ], createTime: 0, updateTime: 0 });
+    var test_exercise_2 = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blow blah' } ], createTime: 0, updateTime: 0 });
     runway.saveRecord(test_exercise, 'Exercise')
     .then(() => {
       expect(times_called).to.equal(1);
@@ -136,15 +134,15 @@ describe('runway', function() {
       expect(times_called_2).to.equal(2);
       done();
     })
-    .catch(logTestError('Un-subscribe to RecordClass'));  
-
+    .catch(logTestError('Un-subscribe to RecordClass'));
   });
+
   it('Should update subscribers when a record is deleted', function(done) {
     let times_called = 0;
     runway.subscribe('Exercise', () => {
-      times_called++; 
+      times_called++;
     });
-    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blah blah' } ], createTime: 0, updateTime: 0 }); 
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'blah blah blah' } ], createTime: 0, updateTime: 0 });
     runway.saveRecord(test_exercise, 'Exercise')
     .then(() => {
       expect(times_called).to.equal(1);
@@ -154,11 +152,12 @@ describe('runway', function() {
       expect(times_called).to.equal(2);
       done();
     })
-    .catch(logTestError('Subscribe to RecordClass'));  
+    .catch(logTestError('Subscribe to RecordClass'));
   });
+
   it('Should only return records for the current user id', function(done) {
-    var test_exercise   = new Exercise({ bliss_id: 'abc', responses: [ { a: 'first_user' } ], createTime: 0, updateTime: 0 }); 
-    var test_exercise_2 = new Exercise({ bliss_id: 'abc', responses: [ { a: 'second_user' } ], createTime: 0, updateTime: 0 }); 
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { a: 'first_user' } ], createTime: 0, updateTime: 0 });
+    var test_exercise_2 = new Exercise({ bliss_id: 'abc', responses: [ { a: 'second_user' } ], createTime: 0, updateTime: 0 });
     runway.saveRecord(test_exercise, 'Exercise')
     .then(() => {
       runway.setUserId('demo');
@@ -188,12 +187,14 @@ describe('Record', function() {
     let exercise = new Exercise({ responses: [] });
     expect(exercise.responses).to.deep.equal([]);
   });
+
   it('Should allow fields to be changed', () => {
     let Exercise = getTestRecordClass();
     let exercise = new Exercise({ responses: [] });
     let modified_exercise = exercise.set('responses', [ { cool: 'beans' } ]);
     expect(modified_exercise.responses).to.deep.equal([ { cool: 'beans' } ]);
   });
+
   it('Should throw an error if we attempt to change the index key of a record', () => {
     let Exercise = getTestRecordClass();
     let exercise = new Exercise({ responses: [] });
@@ -201,6 +202,5 @@ describe('Record', function() {
     expect(() => {
       exercise.set('bliss_id', 'funstuff');
     }).to.throw(Error);
-
   });
 });

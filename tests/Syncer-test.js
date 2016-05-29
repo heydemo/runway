@@ -1,23 +1,21 @@
 var expect = require('chai').expect;
 import Q from 'q';
-import { Runway, Model, Syncer } from '../src/index.js';
-import sh from 'shelljs';
+import { Runway, Syncer } from '../src/index.js';
 import getTestRecordClass, { getTestRecords, logTestError } from './getTestRecordClass';
 import { getMockParseInterface } from './MockParse';
 import getTestDatabase from './getTestDatabase';
 import Parse from 'parse/node';
-import now from 'performance-now';
+/* global describe beforeEach it */
 
-
+// eslint-disable-next-line no-unused-vars
 let skip = () => {};
-
 
 describe('Syncer', function(done) {
   var runway, RecordClass, MockParseInterface, syncer, test_records, test_count = 0;
 
   beforeEach(() => {
     test_count++;
-    let name = 'sync_test_'+ test_count;
+    let name = 'sync_test_' + test_count;
     let db = getTestDatabase(name);
     runway = new Runway(name, db);
     runway.setUserId('test_user');
@@ -29,7 +27,7 @@ describe('Syncer', function(done) {
       let deferred = Q.defer();
       deferred.resolve(parse_models);
       return deferred.promise;
-    }
+    };
     return runway.registerRecordClass(RecordClass)
     .then(() => {
       return runway.setLoaded();
@@ -41,7 +39,6 @@ describe('Syncer', function(done) {
   });
   it('Should sync up records', function(done) {
     var results_length;
-    let deferred = Q.defer();
     MockParseInterface.Object.saveAll = (parse_models) => {
       let deferred = Q.defer();
       results_length = parse_models.length;
@@ -54,12 +51,12 @@ describe('Syncer', function(done) {
       }
       catch (e) {
         console.log(e);
-        throw e;
         done();
+        throw e;
       }
       deferred.resolve(parse_models);
       return deferred.promise;
-    }
+    };
 
     runway.saveRecords(test_records, 'Exercise')
     .then(() => {
@@ -83,28 +80,28 @@ describe('Syncer', function(done) {
     .then(() => {
       MockParseInterface.Object.saveAll = (parse_models) => {
         let deferred = Q.defer();
-        try  {
+        try {
           expect(parse_models).to.deep.equal([]);
           done();
           deferred.resolve(parse_models);
           return deferred.promise;
         }
-        catch(e) {
+        catch (e) {
           console.log(e);
         }
-      }
+      };
       return syncer.syncUp();
     });
   });
   it('Should not attempt to sync if syncing is already in progress', function(done) {
     var deferred = Q.defer(), models;
     MockParseInterface.call_count = 0;
-    MockParseInterface.Object.saveAll = (parse_models) => { 
+    MockParseInterface.Object.saveAll = (parse_models) => {
       models = parse_models;
       MockParseInterface.call_count++;
       return deferred.promise;
-    }
-    let promise = syncer.syncUp();
+    };
+    syncer.syncUp();
     syncer.syncUp();
     setTimeout(function() {
       expect(MockParseInterface.call_count).to.equal(1);
@@ -123,17 +120,16 @@ describe('Syncer', function(done) {
     .then(() => {
       MockParseInterface.Object.saveAll = (parse_models) => {
         let deferred = Q.defer();
-        try  {
-          let type = typeof(parse_models[0].get('responses'));
+        try {
           expect(parse_models[0].get('responses')).to.deep.equal(additional_record.responses);
           done();
           deferred.resolve(parse_models);
           return deferred.promise;
         }
-        catch(e) {
+        catch (e) {
           console.log(e);
         }
-      }
+      };
       return syncer.syncUp();
     });
   });
@@ -155,11 +151,11 @@ describe('Syncer', function(done) {
     MockParseInterface.Object.saveAll = function(parse_models) {
       let deferred = Q.defer();
       times_called++;
-      if (times_called == 1) {
+      if (times_called === 1) {
         deferred.reject({ code: Parse.Error.CONNECTION_FAILED, message: 'Cannot connect to server' });
         return deferred.promise;
       }
-      else if (times_called == 2) {
+      else if (times_called === 2) {
         expect(parse_models[0].get('bliss_id')).to.equal('abc');
         deferred.resolve(parse_models);
         done();
@@ -170,7 +166,7 @@ describe('Syncer', function(done) {
     runway.saveRecords(test_records, 'Exercise')
     .then(() => {
       return syncer.syncUp();
-    })
+    });
   });
   describe('syncDown', function() {
     it('Should save new models from Parse', function(done) {
@@ -183,7 +179,7 @@ describe('Syncer', function(done) {
       });
     });
   });
-  it('Should not sync already synced records', function(done) {
+  it('Should not sync down already synced records', function(done) {
     syncer.syncDown()
     .then(() => {
       runway.saveRecords = (records) => {
@@ -195,13 +191,6 @@ describe('Syncer', function(done) {
     .catch((error) => {
       console.log(error);
     });
-
-
   });
 });
-
-
-
-
-
 
