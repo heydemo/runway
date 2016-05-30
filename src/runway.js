@@ -1,6 +1,7 @@
 import objectValues from 'object-values';
 import Q from 'q';
 import generateId from './idGenerator';
+import treatAsPromise from 'treat-as-promise';
 
 if (typeof window !== 'undefined') {
   window.generateId = generateId;
@@ -11,11 +12,13 @@ import getDatabase from './database.js';
 export default class RunWay {
   constructor(name, db = false, { user_id } = {}) {
     this.name = name;
-    this._db = db || getDatabase(name);
+    this._db_loaded = db ? treatAsPromise(db) : getDatabase(name);
     this._RecordClasses = {};
     this._subscribers = {};
     this._load_deferred = Q.defer();
     this._user_id = user_id || '';
+    this.sql_error_count = 0;
+    this.handleExecuteSqlError = this.handleExecuteSqlError.bind(this);
   }
   getUserId() {
     return this._user_id;
@@ -30,17 +33,42 @@ export default class RunWay {
     this._load_deferred.resolve();
     return this._load_deferred;
   }
-  executeSql(sql, args = []) {
-    return this._db.executeSql(sql, args)
+  executeSql(sql, args = [], retry_number = 0) {
+    return this._db_loaded.then((db) => {
+      return db.executeSql(sql, args);
+    })
     .then((result) => {
       return this.getSqlResultRows(result);
     })
-    .catch(function(error) {
+    .catch((error) => {
+      console.log(error);
+      console.log(`retry_number: ${retry_number}`);
+      return this.handleExecuteSqlError({ sql, args, error, retry_number });
+    });
+  }
+  handleExecuteSqlError({ sql, args, error, retry_number }) {
+    this.sql_error_count++;
+    if (this.sql_error_count > 5) {
+      this.clear()
+      .then(() => {
+        document.location.reload();
+      });
+    }
+    else if (retry_number === 0) {
+      return this.recreateTables()
+      .then(() => {
+        retry_number++;
+        return this.executeSql(sql, args, retry_number);
+      });
+    }
+    else {
       console.log(`SQL ERROR ${error.message}`);
       console.log(sql);
       console.log(error);
       console.log(arguments);
-    });
+      console.log('ERROR CODE');
+      console.log(error.code);
+    }
   }
   clear() {
     let table_names = Object.keys(this._RecordClasses);
@@ -51,9 +79,9 @@ export default class RunWay {
     return Q.all(promises)
     .then(() => {
       if (typeof localStorage !== 'undefined') {
-        // need to clear tables here
-        // localStorage.removeItem();
+        localStorage.clear();
       }
+      this.clearTablesCreated();
     });
   }
   getRecordClassName(RecordClass) {
@@ -62,7 +90,7 @@ export default class RunWay {
   registerRecordClass(RecordClass) {
     let name = this.getRecordClassName(RecordClass);
     this._RecordClasses[name] = RecordClass;
-    if (!this.tableCreated(name)) {
+    if (!this.tableAlreadyCreated(name)) {
       return this.createTable(RecordClass);
     }
     else {
@@ -90,7 +118,16 @@ export default class RunWay {
       this.setTableCreated(RecordClassName);
     });
   }
-  tableCreated(table_name) {
+  // Create tables (if not exist)
+  recreateTables() {
+    let promises = [];
+    Object.keys(this._RecordClasses).forEach((RecordClassName) => {
+      let RecordClass = this._RecordClasses[RecordClassName];
+      promises.push(this.createTable(RecordClass));
+    });
+    return Q.all(promises);
+  }
+  tableAlreadyCreated(table_name) {
     if (typeof localStorage !== 'undefined') {
       return !!localStorage.getItem(`runway_${this.name}_${table_name}_table_created`);
     }
@@ -100,6 +137,16 @@ export default class RunWay {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(`runway_${this.name}_${table_name}_table_created`, true);
     }
+  }
+  clearTableCreated(table_name) {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(`runway_${this.name}_${table_name}_table_created`, true);
+    }
+  }
+  clearTablesCreated() {
+    Object.keys(this._RecordClasses).forEach((RecordClassName) => {
+      this.clearTableCreated(RecordClassName);
+    });
   }
   exists(index_value, RecordClassName) {
     let RecordClass = this.getRecordClassByName(RecordClassName);
@@ -162,6 +209,7 @@ export default class RunWay {
     });
   }
   getSqlResultRows(result) {
+    return result;
     let sql_rows;
     let return_rows = [];
     if (result) {

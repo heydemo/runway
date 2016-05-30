@@ -2,9 +2,9 @@ var expect = require('chai').expect;
 import getTestRecordClass, { getTestRecords, logTestError } from './getTestRecordClass';
 import getTestDatabase from './getTestDatabase';
 import { Runway } from '../src/index';
-import Q from 'q';
 /* global describe beforeEach it */
 
+// eslint-disable-next-line no-unused-vars
 let skip = () => {};
 
 describe('runway', function() {
@@ -20,6 +20,23 @@ describe('runway', function() {
     .then(() => {
       return runway.setLoaded();
     });
+  });
+
+  it('Should re-create tables if they are accidentally deleted somehow', function(done) {
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah blah, ain't no thang" } ], createTime: 0, updateTime: 0 });
+
+    runway.executeSql('DROP TABLE Exercise')
+    .then(() => {
+      return runway.saveRecord(test_exercise, 'Exercise');
+    })
+    .then(() => {
+      return runway.findRecord({ bliss_id: 'abc' }, 'Exercise');
+    })
+    .then((record) => {
+      expect(record.responses).to.deep.equal(test_exercise.responses);
+      done();
+    })
+    .catch(logTestError('Re-Create Tables on accidental deletion test'));
   });
 
   it('Should actually delete', function(done) {
