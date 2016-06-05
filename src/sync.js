@@ -1,4 +1,8 @@
+// #sourceURL=/var/www/my_node_modules/runway/src/sync.js
 import Q from 'q';
+Q.longStackSupport = true;
+import findAll from 'parse-find-all';
+import treatAsPromise from 'treat-as-promise';
 
 /**
  *  Runway interface
@@ -69,6 +73,7 @@ export default class Syncer {
     }
   }
   defaultLogError(error) {
+    console.log('default error');
     console.log(error);
   }
   errorIsUnexpected(error) {
@@ -90,36 +95,42 @@ export default class Syncer {
     return Q.all(promises);
   }
   syncUpClass(RecordClass, RecordClassName) {
-    let ParseClass = this.parse.Object.extend(RecordClassName);
-    let parse_models = [];
     return this.runway.executeSql(`SELECT * FROM ${RecordClassName} WHERE deleted = 0 and synced = 0`)
     .then((rows) => {
-      rows.forEach((row) => {
-        delete row.synced;
-        let user_id = row.user_id;
-        row = this.runway.unpackRecord(row, RecordClassName);
-        let parse_model = new ParseClass(row);
-        this.setUserAndAclOnParseModel(parse_model, user_id);
-        parse_models.push(parse_model);
+      let parse_models = this.convertRowsToParseModels(rows, RecordClassName);
+      return this.saveParseModels(parse_models);
+    })
+    .then((parse_models) => {
+      let records = parse_models.map(parse_model => {
+        return this.parseModelToRecord(parse_model, RecordClass);
       });
-      return this.parse.Object.saveAll(parse_models)
-      .then(
-        (parse_models) => {
-          if (!parse_models) {
-            throw new Error('parse_models undefined from Parse.Object.saveAll');
-          }
-          let records = parse_models.map(parse_model => {
-            return this.parseModelToRecord(parse_model, RecordClass);
-          });
-          return this.markAsSynced(records, RecordClassName);
-        }
-      );
+      return this.markAsSynced(records, RecordClassName);
     })
     .catch((error) => {
-      console.log('ERROR in sync up');
-      console.log(error);
+      this.logError(error);
       throw error;
     });
+  }
+  convertRowsToParseModels(rows, RecordClassName) {
+    let ParseClass = this.parse.Object.extend(RecordClassName);
+    let parse_models = [];
+    rows.forEach((row) => {
+      delete row.synced;
+      let user_id = row.user_id;
+      row = this.runway.unpackRecord(row, RecordClassName);
+      let parse_model = new ParseClass(row);
+      this.setUserAndAclOnParseModel(parse_model, user_id);
+      parse_models.push(parse_model);
+    });
+    return parse_models;
+  }
+  saveParseModels(parse_models) {
+    if (parse_models.length > 0) {
+      return this.parse.Object.saveAll(parse_models);
+    }
+    else {
+      return treatAsPromise([]);
+    }
   }
   setUserAndAclOnParseModel(parse_model, user_id) {
     if (typeof user_id !== 'string') {
@@ -141,13 +152,19 @@ export default class Syncer {
     delete obj.objectId;
     return new RecordClass(obj);
   }
-  markAsSynced(records, RecordClassName) {
-    let version_ids = records.map(record => record.version_id);
-    let version_id_string = "'" + version_ids.join("', '") + "'";
-    return this.runway.executeSql(`UPDATE ${RecordClassName} SET synced = 1 WHERE version_id in (${version_id_string})`);
+  markAsSynced(Records, RecordClassName) {
+    this.runway.markAsSynced(Records, RecordClassName);
   }
   syncDown() {
-    return this.syncDownClasses();
+    var server_time;
+    return this.getTimeFromServer()
+    .then((time) => {
+      server_time = time;
+      return this.syncDownClasses();
+    })
+    .then(() => {
+      return this.saveLastSyncDownTime(server_time);
+    });
   }
   syncDownClasses() {
     let record_classes = this.runway.getRecordClasses();
@@ -158,20 +175,40 @@ export default class Syncer {
     });
     return Q.all(promises);
   }
+  saveLastSyncDownTime(time) {
+    if (typeof localStorage !== 'undefined') {
+      let key = this.getSyncDownTimeKey();
+      localStorage.setItem(key, JSON.stringify(time));
+    }
+  }
+  getLastSyncDownTime() {
+    let time;
+    if (typeof localStorage !== 'undefined') {
+      let key = this.getSyncDownTimeKey();
+      time = JSON.parse(localStorage.getItem(key));
+    }
+    return (typeof time === 'number') ? time : 0;
+  }
+  getSyncDownTimeKey() {
+    let current_user_id = this.getUserId();
+    return `runway_${this.runway.name}_${current_user_id}_last_sync_down_time`;
+  }
+  getTimeFromServer() {
+    return this.parse.Cloud.run('getServerTime');
+  }
   getVersionIds(RecordClassName) {
     return this.runway.executeSql(`SELECT * from ${RecordClassName}`)
     .then((rows) => {
       return rows.map(row => row.version_id);
     })
     .catch((e) => {
+      console.log('getVersionIds error');
       console.log(e);
     });
   }
   syncDownClass(RecordClass, RecordClassName) {
-    let current_user = this.parse.User.current();
-    let query = new this.parse.Query(RecordClassName);
-    let parse_model_promise = query.equalTo('user', current_user).find();
-    let version_id_promise = this.getVersionIds(RecordClassName);
+    let version_id_promise  = this.getVersionIds(RecordClassName);
+    let parse_model_promise = this.getSyncDownClassParseQuery(RecordClassName);
 
     return Q.all([parse_model_promise, version_id_promise])
     .then((values) => {
@@ -184,9 +221,30 @@ export default class Syncer {
         let index = existing_version_ids.indexOf(record.version_id);
         return index === -1;
       });
-      let update_version_ids = false;
-      return this.runway.saveRecords(records, RecordClassName, update_version_ids);
+      return this.runway.saveRecords(records, RecordClassName, { update_version_ids: false, already_synced: true })
     });
   }
+  getUserId() {
+    return this.parse.User.current() ? this.parse.User.current().id : '';
+  }
+  getSyncDownClassParseQuery(RecordClassName) {
+    let current_user_id = this.getUserId();
+    let last_sync_down_time = this.getLastSyncDownTime();
+    let query = new this.parse.Query(RecordClassName)
+                              .equalTo('user_id', current_user_id)
+                              .greaterThan('savedToParseTime', last_sync_down_time);
+
+    return findAll(query);
+  }
+}
+
+function removeProperties(obj, props) {
+  let new_obj = {};
+  Object.keys(obj).forEach((key) => {
+    if (props.indexOf(key) === -1) {
+      new_obj[key] = obj[key];
+    }
+  });
+  return new_obj;
 }
 

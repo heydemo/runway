@@ -25,6 +25,8 @@ describe('runway', function() {
   it('Should re-create tables if they are accidentally deleted somehow', function(done) {
     var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah blah, ain't no thang" } ], createTime: 0, updateTime: 0 });
 
+    // We are purposefully creating an error, so ignore
+    runway.log = () => { };
     runway.executeSql('DROP TABLE Exercise')
     .then(() => {
       return runway.saveRecord(test_exercise, 'Exercise');
@@ -66,6 +68,8 @@ describe('runway', function() {
     .then((records) => {
       expect(typeof (records[0])).to.equal('object');
       expect(records[0].responses).to.deep.equal(test_exercise.responses);
+      expect(records[0].version_id).to.not.equal('undefined');
+      expect(records[0].version_id).to.be.ok;
       done();
     })
     .catch(logTestError('Save / Retrieve'));
@@ -79,8 +83,11 @@ describe('runway', function() {
     })
     .then((records) => {
       expect(records.length).to.equal(3);
+      expect(records[0].version_id).to.not.equal(undefined);
+      expect(records[0].version_id).to.not.equal('undefined');
       done();
-    });
+    })
+    .catch(logTestError('Save multiple records'));
   });
 
   it('Should delete the database', function(done) {
@@ -89,7 +96,7 @@ describe('runway', function() {
       return runway.executeSql('SELECT tbl_name from sqlite_master');
     })
     .then((rows) => {
-      expect(rows.length).to.equal(1); 
+      expect(rows.length).to.equal(1);
       done();
     })
     .catch(logTestError('Delete database'));

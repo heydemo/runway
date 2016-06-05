@@ -25,8 +25,11 @@ export function getTestRecords() {
 
 export function logTestError(test_description) {
   return (error) => {
-    console.log(`Error in ${test_description}`);
+    console.log(`(TEST) Error in ${test_description}`);
     console.log(error);
+    console.log('STACK');
+    console.log(error.stack);
+    console.trace();
     throw(error);
     return error;
   }

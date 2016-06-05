@@ -5,7 +5,6 @@ var deferred = Q.defer();
 var device_ready_promise = deferred.promise;
 
 function onDeviceReady() {
-  console.log('that ole device is ready boss!');
   deferred.resolve();
 }
 

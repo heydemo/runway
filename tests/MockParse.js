@@ -1,5 +1,6 @@
 import Q from 'q';
 import MockQueryResults from './MockQueryResults';
+import treatAsPromise from 'treat-as-promise';
 var Parse = require('parse/node');
 
 class MockParseQuery extends Parse.Query {
@@ -38,7 +39,16 @@ export function getMockParseInterface() {
       },
     },
     ACL: Parse.ACL,
-
+    Cloud: {
+      run: (func_name) => {
+        switch (func_name) {
+          case 'getServerTime':
+            return treatAsPromise(Math.floor(Date.now() / 1000));
+          default:
+            throw new Error(`No such cloud code function '${func_name}' defined in our MockParse class!`);
+        }
+      },
+    },
   });
 }
 

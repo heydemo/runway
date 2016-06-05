@@ -14,7 +14,6 @@ export default class webSqlPromise {
             items = result.rows._array;
           }
           if (isDroidResult(result)) {
-            console.log('is droid result!');
             items = [];
             for (let x = 0; x < result.rows.length; x++) {
               items.push(result.rows.item(x));

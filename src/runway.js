@@ -1,5 +1,6 @@
 import objectValues from 'object-values';
 import Q from 'q';
+Q.longStackSupport = true;
 import generateId from './idGenerator';
 import treatAsPromise from 'treat-as-promise';
 
@@ -19,6 +20,7 @@ export default class RunWay {
     this._user_id = user_id || '';
     this.sql_error_count = 0;
     this.handleExecuteSqlError = this.handleExecuteSqlError.bind(this);
+    this.saveRecord = this.saveRecords;
   }
   getUserId() {
     return this._user_id;
@@ -33,6 +35,9 @@ export default class RunWay {
     this._load_deferred.resolve();
     return this._load_deferred;
   }
+  log(mixed) {
+    console.log(mixed);
+  }
   executeSql(sql, args = [], retry_number = 0) {
     return this._db_loaded.then((db) => {
       return db.executeSql(sql, args);
@@ -41,8 +46,8 @@ export default class RunWay {
       return this.getSqlResultRows(result);
     })
     .catch((error) => {
-      console.log(error);
-      console.log(`retry_number: ${retry_number}`);
+      this.log(error);
+      this.log(`retry_number: ${retry_number}`);
       return this.handleExecuteSqlError({ sql, args, error, retry_number });
     });
   }
@@ -157,22 +162,45 @@ export default class RunWay {
       return records.length > 0;
     });
   }
-  saveRecord(Record, RecordClassName, update_version_ids = true) {
-    if (update_version_ids) {
-      let version_id = generateId();
-      Record = Record.set('version_id', version_id);
+  saveRecords(_Records, RecordClassName, { update_version_ids = true, update_subscribers = true, already_synced = false } = {}) {
+    var Records;
+    if (typeof _Records.length === 'undefined') {
+      Records = [_Records];
     }
-    return this.insertRecord(Record, RecordClassName)
-    .then(() => {
-      return this.updateSubscribers(RecordClassName);
-    });
+    else {
+      Records = _Records;
+    }
+    if (Records.length > 0) {
+      if (update_version_ids) {
+        Records.forEach((Record, key) => {
+          let version_id = generateId();
+          Records[key] = Record.set('version_id', version_id);
+        });
+      }
+      return this.insertRecord(Records, RecordClassName)
+      .then(() => {
+        if (already_synced) {
+          return this.markAsSynced(Records, RecordClassName);
+        }
+      })
+      .then(() => {
+        if (update_subscribers) {
+          return this.updateSubscribers(RecordClassName);
+        }
+      });
+    }
+    else {
+      return treatAsPromise();
+    }
   }
-  saveRecords(Records, RecordClassName, update_version_ids = true) {
-    let promises = [];
-    Records.forEach((record) => {
-      promises.push(this.saveRecord(record, RecordClassName, update_version_ids));
-    });
-    return Q.all(promises);
+  markAsSynced(records, RecordClassName) {
+    if (typeof records !== 'object' || typeof records.length === 'undefined') {
+      throw new Error('Sent bad value to markAsSynced');
+    }
+    let version_ids = records.map(record => record.version_id);
+    let version_id_string = "'" + version_ids.join("', '") + "'";
+    let sql = `UPDATE ${RecordClassName} SET synced = 1 WHERE version_id in (${version_id_string})`;
+    return this.executeSql(sql);
   }
   insertRecord(Record, RecordClassName) {
     let sql = this.getInsertRecordSql(Record, RecordClassName);
@@ -314,6 +342,7 @@ export default class RunWay {
     if (!RecordClass) {
       throw new Error('No RecordClass provided as first arg of getCreateTableSql');
     }
+    let index_key   = this.getRecordClassIndex(RecordClass);
     let RecordClassName = this.getRecordClassName(RecordClass);
     let fields = this.getFields(RecordClass);
     let field_keys = Object.keys(fields);
@@ -327,7 +356,7 @@ export default class RunWay {
     parsed_fields.push('synced INTEGER NOT NULL DEFAULT 0');
     parsed_fields.push("user_id TEXT NOT NULL DEFAULT ''");
     let fields_sql = parsed_fields.join(', ');
-    return `CREATE TABLE IF NOT EXISTS ${RecordClassName} (${fields_sql})`;
+    return `CREATE TABLE IF NOT EXISTS ${RecordClassName} (${fields_sql}, UNIQUE (${index_key}, version_id))`;
   }
   getFields(RecordClass) {
     let definition = RecordClass.getDefinition();
@@ -341,17 +370,38 @@ export default class RunWay {
     let index_key   = this.getRecordClassIndex(RecordClass);
     return this.getFindRecordSql({ [index_key]: Record[index_key] }, RecordClassName);
   }
-  getInsertRecordSql(Record, RecordClassName) {
+  getInsertRecordSql(Records, RecordClassName) {
     if (!RecordClassName) {
       throw new Error('RecordClassName not sent to getInsertRecordSql!');
     }
+    if (typeof Records.length === 'undefined') {
+      Records = [Records];
+    }
+
+    let columns_sql = this.getInsertRecordColumnValues(Records[0], RecordClassName).join(', ');
+    let rows = [];
+    Records.forEach((Record) => {
+      let row = '(' + this.getInsertRecordRowValues(Record, RecordClassName).join(', ') + ')';
+      rows.push(row);
+    });
+    let field_values_sql = rows.join(', ');
+
+    let sql = `INSERT INTO ${RecordClassName} (${columns_sql}) VALUES ${field_values_sql}`;
+    return sql;
+  }
+  getInsertRecordRowValues(Record, RecordClassName) {
     let RecordClass = this.getRecordClassByName(RecordClassName);
     let field_values = this.getRecordFieldValuesForSql(Record, RecordClass);
     field_values.user_id = `'${this.getUserId()}'`;
-    let field_values_sql = objectValues(field_values).join(', ');
-    let columns_sql = Object.keys(field_values).join(', ');
-    let sql = `INSERT INTO ${RecordClassName} (${columns_sql}) VALUES (${field_values_sql})`;
-    return sql;
+    let row_values = objectValues(field_values);
+    return row_values;
+  }
+  getInsertRecordColumnValues(Record, RecordClassName) {
+    let RecordClass = this.getRecordClassByName(RecordClassName);
+    let field_values = this.getRecordFieldValuesForSql(Record, RecordClass);
+    field_values.user_id = `'${this.getUserId()}'`;
+    let column_values = Object.keys(field_values);
+    return column_values;
   }
   getUpdateRecordSql(Record, RecordClassName) {
     if (!RecordClassName) {
@@ -506,11 +556,16 @@ export default class RunWay {
     );
   }
   updateSubscribers(RecordClassName) {
+    let deferred = Q.defer();
     let subscribers = this._subscribers[RecordClassName] || [];
     let global_subscribers = this._subscribers['all'] || [];
-    subscribers.concat(global_subscribers).forEach((subscriber) => {
-      subscriber();
+    setTimeout(() => {
+      subscribers.concat(global_subscribers).forEach((subscriber) => {
+        subscriber();
+      });
+      deferred.resolve();
     });
+    return deferred.promise;
   }
 }
 

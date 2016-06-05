@@ -5,6 +5,7 @@ import getTestRecordClass, { getTestRecords, logTestError } from './getTestRecor
 import { getMockParseInterface } from './MockParse';
 import getTestDatabase from './getTestDatabase';
 import Parse from 'parse/node';
+import treatAsPromise from 'treat-as-promise';
 /* global describe beforeEach it */
 
 // eslint-disable-next-line no-unused-vars
@@ -36,6 +37,19 @@ describe('Syncer', function(done) {
 
   it('Should pass canary test', () => {
     expect(true).to.equal(true);
+  });
+  it('Should set synced down records as synced = 1 in database', (done) => {
+    syncer.syncDown()
+    .then(() => {
+      return runway.executeSql('SELECT * FROM Exercise');
+    })
+    .then((results) => {
+      results.forEach((result) => {
+        expect(result.synced).to.equal(1);
+      });
+      done();
+    })
+    .catch(logTestError('Syncer - syncDown - set synced down records as synced = 1'));
   });
   it('Should sync up records', function(done) {
     var results_length;
@@ -72,42 +86,34 @@ describe('Syncer', function(done) {
     let converted_record = syncer.parseModelToRecord(parse_model, RecordClass);
     expect(JSON.stringify(converted_record)).to.equal(JSON.stringify(test_record));
   });
-  it('Should not synced already synced records', (done) => {
+  it('Should not synced up already synced records', (done) => {
     runway.saveRecords(test_records, 'Exercise')
     .then(() => {
       return syncer.syncUp();
     })
     .then(() => {
       MockParseInterface.Object.saveAll = (parse_models) => {
-        let deferred = Q.defer();
-        try {
-          expect(parse_models).to.deep.equal([]);
-          done();
-          deferred.resolve(parse_models);
-          return deferred.promise;
-        }
-        catch (e) {
-          console.log(e);
-        }
+        expect('This should not happen').to.equal('not happening');
+        done();
       };
-      return syncer.syncUp();
+      syncer.syncUp()
+      .then(() => {
+        done();
+      });
     });
   });
+
   it('Should not attempt to sync if syncing is already in progress', function(done) {
-    var deferred = Q.defer(), models;
     MockParseInterface.call_count = 0;
+    let deferred = Q.defer();
     MockParseInterface.Object.saveAll = (parse_models) => {
-      models = parse_models;
       MockParseInterface.call_count++;
       return deferred.promise;
     };
-    syncer.syncUp();
-    syncer.syncUp();
-    setTimeout(function() {
-      expect(MockParseInterface.call_count).to.equal(1);
-      deferred.resolve(models);
-      done();
-    }, 200);
+    let p1 = syncer.syncUp();
+    let p2 = syncer.syncUp();
+    expect(p1).to.equal(p2);
+    done();
   });
   it('Should handle re-sync calls after current sync completes', (done) => {
     let additional_record = test_records[0].set('responses', [{ anotherguy: 'anothervalue' }]);
@@ -148,6 +154,8 @@ describe('Syncer', function(done) {
   it('Should schedule a resync if temporary problem', function(done) {
     var times_called = 0;
     syncer.setRetryInterval(10);
+    // We are purposefully causing an error, so don't want to log to console
+    syncer.logError = () => { };
     MockParseInterface.Object.saveAll = function(parse_models) {
       let deferred = Q.defer();
       times_called++;
@@ -163,15 +171,24 @@ describe('Syncer', function(done) {
       }
     };
 
+    var error_count = 0;
+
     runway.saveRecords(test_records, 'Exercise')
     .then(() => {
       return syncer.syncUp();
+    })
+    .catch((error) => {
+      error_count++;
+      if (error_count > 1) {
+        console.log(error);
+      }
     });
   });
   describe('syncDown', function() {
     it('Should save new models from Parse', function(done) {
       runway.saveRecords = (records) => {
         done();
+        return treatAsPromise();
       };
       syncer.syncDown()
       .catch((error) => {
@@ -185,6 +202,7 @@ describe('Syncer', function(done) {
       runway.saveRecords = (records) => {
         expect(records).to.deep.equal([]);
         done();
+        return treatAsPromise();
       };
       return syncer.syncDown();
     })
