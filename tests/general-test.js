@@ -21,7 +21,38 @@ describe('runway', function() {
       return runway.setLoaded();
     });
   });
+  it('Should actually delete', function(done) {
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'DELETE THIS GUY' } ], createTime: 0, updateTime: 0 });
 
+    runway.saveRecord(test_exercise, 'Exercise')
+    .then(() => {
+      return runway.deleteRecord(test_exercise);
+    })
+    .then(() => {
+      return runway.findRecord({ bliss_id: 'abc' }, 'Exercise');
+    })
+    .then((record) => {
+      expect(record).to.equal(undefined);
+      done();
+    })
+    .catch(logTestError('Delete Record'));
+  });
+  it('IMPL: Should delete a record by saving record with deleted field set to 1', function(done) {
+    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: 'DELETE THIS GUY' } ], createTime: 0, updateTime: 0, deleted: 1 });
+
+    runway.saveRecord(test_exercise, 'Exercise')
+    .then(() => {
+      return runway.deleteRecord(test_exercise);
+    })
+    .then(() => {
+      return runway.findRecord({ bliss_id: 'abc' }, 'Exercise');
+    })
+    .then((record) => {
+      expect(record).to.equal(undefined);
+      done();
+    })
+    .catch(logTestError('Delete Record by saving record with deleted = 1'));
+  });
   it('Should re-create tables if they are accidentally deleted somehow', function(done) {
     var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah blah, ain't no thang" } ], createTime: 0, updateTime: 0 });
 
@@ -41,22 +72,6 @@ describe('runway', function() {
     .catch(logTestError('Re-Create Tables on accidental deletion test'));
   });
 
-  it('Should actually delete', function(done) {
-    var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah blah, ain't no thang" } ], createTime: 0, updateTime: 0 });
-
-    runway.saveRecord(test_exercise, 'Exercise')
-    .then(() => {
-      return runway.deleteRecord(test_exercise);
-    })
-    .then(() => {
-      return runway.findRecord({ bliss_id: 'abc' }, 'Exercise');
-    })
-    .then((record) => {
-      expect(record).to.equal(undefined);
-      done();
-    })
-    .catch(logTestError('Delete Record'));
-  });
 
   it('Should save / retrieve records', function(done) {
     var test_exercise = new Exercise({ bliss_id: 'abc', responses: [ { bbb: "blah blah blah, ain't no thang" } ], createTime: 0, updateTime: 0 });

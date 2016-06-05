@@ -95,7 +95,7 @@ export default class Syncer {
     return Q.all(promises);
   }
   syncUpClass(RecordClass, RecordClassName) {
-    return this.runway.executeSql(`SELECT * FROM ${RecordClassName} WHERE deleted = 0 and synced = 0`)
+    return this.runway.executeSql(`SELECT * FROM ${RecordClassName} WHERE synced = 0`)
     .then((rows) => {
       let parse_models = this.convertRowsToParseModels(rows, RecordClassName);
       return this.saveParseModels(parse_models);
@@ -115,10 +115,12 @@ export default class Syncer {
     let ParseClass = this.parse.Object.extend(RecordClassName);
     let parse_models = [];
     rows.forEach((row) => {
+      let is_deleted = row.deleted;
       delete row.synced;
       let user_id = row.user_id;
       row = this.runway.unpackRecord(row, RecordClassName);
       let parse_model = new ParseClass(row);
+      parse_model.set('deleted', is_deleted);
       this.setUserAndAclOnParseModel(parse_model, user_id);
       parse_models.push(parse_model);
     });
@@ -232,7 +234,8 @@ export default class Syncer {
     let last_sync_down_time = this.getLastSyncDownTime();
     let query = new this.parse.Query(RecordClassName)
                               .equalTo('user_id', current_user_id)
-                              .greaterThan('savedToParseTime', last_sync_down_time);
+                              .greaterThan('savedToParseTime', last_sync_down_time)
+                              .addAscending('updateTime'); 
 
     return findAll(query);
   }

@@ -212,26 +212,39 @@ export default class RunWay {
   }
   deleteRecord(Record, RecordClassName) {
     RecordClassName || (RecordClassName = Record.class_name);
-    let sql = this.getDeleteRecordSql(Record, RecordClassName);
-    return this.executeSql(sql)
-    .then(() => {
+    let RecordClass = this.getRecordClassByName(RecordClassName);
+    let index_key   = this.getRecordClassIndex(RecordClass);
+    let field_values = this.getRecordFieldValuesForSql(Record, RecordClass);
+    let index_value = field_values[index_key];
+    return this.executeSql(`SELECT max(_id) as id, version_id FROM ${RecordClassName} WHERE ${index_key} = ${index_value}`)
+    .then((rows) => {
+      let row = rows[0];
+      let version_id = row.version_id;
+      let updateTime = Date.now() / 1000;
+      let new_version_id = generateId();
+      let sql = `UPDATE ${RecordClassName} SET version_id = '${new_version_id}', deleted = 1, synced = 0, updateTime = ${updateTime} WHERE version_id = '${version_id}'`;
+      return this.executeSql(sql);
+    })
+    .then((result) => {
       return this.updateSubscribers(RecordClassName);
     });
   }
   findRecords(fields, RecordClassName) {
     // Screen out 'deleted' records
     // We don't actually delete because we need to sync the deletion
-    let augmented_fields = Object.assign({ deleted: 0 }, fields);
     return this.onLoad()
     .then(() => {
-      return this._findRecords(augmented_fields, RecordClassName);
+      return this._findRecords(fields, RecordClassName);
     });
   }
   _findRecords(fields, RecordClassName) {
     let sql = this.getFindRecordSql(fields, RecordClassName);
     return this.executeSql(sql)
     .then((rows) => {
-      return rows.map((row) => {
+      return rows.filter((row) => {
+        return !row.deleted;
+      })
+      .map((row) => {
         return this.unpackRecord(row, RecordClassName);
       });
     });
@@ -273,9 +286,6 @@ export default class RunWay {
     let unpacked_field_values = {};
     Object.keys(field_types).forEach((field_name) => {
       // Skip the internally used 'deleted' column
-      if (field_name === 'deleted') {
-        return;
-      }
       let type = field_types[field_name];
       let value;
       switch (type) {
@@ -389,19 +399,19 @@ export default class RunWay {
     let sql = `INSERT INTO ${RecordClassName} (${columns_sql}) VALUES ${field_values_sql}`;
     return sql;
   }
-  getInsertRecordRowValues(Record, RecordClassName) {
+  getInsertRecordKeysAndValues(Record, RecordClassName) {
     let RecordClass = this.getRecordClassByName(RecordClassName);
     let field_values = this.getRecordFieldValuesForSql(Record, RecordClass);
     field_values.user_id = `'${this.getUserId()}'`;
-    let row_values = objectValues(field_values);
-    return row_values;
+    return field_values;
+  }
+  getInsertRecordRowValues(Record, RecordClassName) {
+    let field_values = this.getInsertRecordKeysAndValues(Record, RecordClassName);
+    return objectValues(field_values);
   }
   getInsertRecordColumnValues(Record, RecordClassName) {
-    let RecordClass = this.getRecordClassByName(RecordClassName);
-    let field_values = this.getRecordFieldValuesForSql(Record, RecordClass);
-    field_values.user_id = `'${this.getUserId()}'`;
-    let column_values = Object.keys(field_values);
-    return column_values;
+    let field_values = this.getInsertRecordKeysAndValues(Record, RecordClassName);
+    return Object.keys(field_values);
   }
   getUpdateRecordSql(Record, RecordClassName) {
     if (!RecordClassName) {
@@ -472,7 +482,7 @@ export default class RunWay {
   getFieldsSelectSql(RecordClass) {
     let fields = this.getFields(RecordClass);
     delete fields.updateTime;
-    let sql = Object.keys(fields).join(', ') + ', updateTime, max(_id) as _id';
+    let sql = Object.keys(fields).join(', ') + ', deleted, updateTime, max(_id) as _id';
     return sql;
   }
   escape(value) {
@@ -515,9 +525,7 @@ export default class RunWay {
       let value = this.formatFieldValueForSql(Record[field_name], type);
       field_values[field_name] = value;
     });
-    if (typeof Record.deleted === 'number') {
-      field_values.deleted = Record.deleted;
-    }
+    field_values.deleted = (typeof Record.deleted === 'number') ? Record.deleted : 0;
 
     return field_values;
   }

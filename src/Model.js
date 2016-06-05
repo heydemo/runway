@@ -7,7 +7,7 @@ function now() {
 }
 
 export default function Model(attributes, options) {
-  let locked_fields = { updateTime: t.Number, createTime: t.Number, class_name: t.String, version_id: t.maybe(t.String) };
+  let locked_fields = { updateTime: t.Number, createTime: t.Number, class_name: t.String, version_id: t.maybe(t.String), deleted: t.maybe(t.Number) };
   attributes = Object.assign({}, attributes, locked_fields);
   var model = t.struct(attributes, options.name);
 
