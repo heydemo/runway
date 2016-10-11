@@ -7,9 +7,7 @@ import treatAsPromise from 'treat-as-promise';
 /**
  *  Runway interface
  *    getRecordClasses
- *
  */
-
 export default class Syncer {
   constructor(runway, options) {
     this.runway = runway;
@@ -223,7 +221,7 @@ export default class Syncer {
         let index = existing_version_ids.indexOf(record.version_id);
         return index === -1;
       });
-      return this.runway.saveRecords(records, RecordClassName, { update_version_ids: false, already_synced: true })
+      return this.runway.saveRecords(records, RecordClassName, { update_version_ids: false, already_synced: true });
     });
   }
   getUserId() {
@@ -235,19 +233,8 @@ export default class Syncer {
     let query = new this.parse.Query(RecordClassName)
                               .equalTo('user_id', current_user_id)
                               .greaterThan('savedToParseTime', last_sync_down_time)
-                              .addAscending('updateTime'); 
+                              .addAscending('updateTime');
 
     return findAll(query);
   }
 }
-
-function removeProperties(obj, props) {
-  let new_obj = {};
-  Object.keys(obj).forEach((key) => {
-    if (props.indexOf(key) === -1) {
-      new_obj[key] = obj[key];
-    }
-  });
-  return new_obj;
-}
-

@@ -249,25 +249,6 @@ export default class RunWay {
       });
     });
   }
-  getSqlResultRows(result) {
-    return result;
-    let sql_rows;
-    let return_rows = [];
-    if (result) {
-      if (result.rows && result.rows._array) {
-        sql_rows = result.rows._array;
-      }
-      else if (result.rows.length) {
-        sql_rows = result.rows;
-      }
-    }
-    if (sql_rows) {
-      for (var count = 0; count < sql_rows.length; count++) {
-        return_rows.push(sql_rows[String(count)]);
-      }
-    }
-    return return_rows;
-  }
   findRecord(fields, RecordClassName) {
     return this.findRecords(fields, RecordClassName)
     .then((records) => {
