@@ -38,6 +38,9 @@ export default class RunWay {
   log(mixed) {
     console.log(mixed);
   }
+  getSqlResultRows(result) {
+    return result;
+  }
   executeSql(sql, args = [], retry_number = 0) {
     return this._db_loaded.then((db) => {
       return db.executeSql(sql, args);
@@ -54,9 +57,11 @@ export default class RunWay {
   handleExecuteSqlError({ sql, args, error, retry_number }) {
     this.sql_error_count++;
     if (this.sql_error_count > 5) {
+      console.log('errored out 5 times');
+      return;
       this.clear()
       .then(() => {
-        document.location.reload();
+        //document.location.reload();
       });
     }
     else if (retry_number === 0) {
@@ -216,22 +221,10 @@ export default class RunWay {
     let index_key   = this.getRecordClassIndex(RecordClass);
     let field_values = this.getRecordFieldValuesForSql(Record, RecordClass);
     let index_value = field_values[index_key];
-    return this.executeSql(`SELECT max(_id) as id, version_id FROM ${RecordClassName} WHERE ${index_key} = ${index_value}`)
-    .then((rows) => {
-      let row = rows[0];
-      let version_id = row.version_id;
-      let updateTime = Date.now() / 1000;
-      let new_version_id = generateId();
-      let sql = `UPDATE ${RecordClassName} SET version_id = '${new_version_id}', deleted = 1, synced = 0, updateTime = ${updateTime} WHERE version_id = '${version_id}'`;
-      return this.executeSql(sql);
-    })
-    .then((result) => {
-      return this.updateSubscribers(RecordClassName);
-    });
+    Record = Record.set('deleted', 1);
+    return this.saveRecord(Record, RecordClassName);    
   }
   findRecords(fields, RecordClassName) {
-    // Screen out 'deleted' records
-    // We don't actually delete because we need to sync the deletion
     return this.onLoad()
     .then(() => {
       return this._findRecords(fields, RecordClassName);
@@ -241,6 +234,8 @@ export default class RunWay {
     let sql = this.getFindRecordSql(fields, RecordClassName);
     return this.executeSql(sql)
     .then((rows) => {
+      // Screen out 'deleted' records
+      // We don't actually delete because we need to sync the deletion
       return rows.filter((row) => {
         return !row.deleted;
       })
@@ -442,9 +437,11 @@ export default class RunWay {
     let field_values = this.getRecordFieldValuesForSql(fields, RecordClass);
     let where_sql_statements = [];
     Object.keys(field_values).forEach((field_name) => {
-      let field_value = field_values[field_name];
-      let where_sql_statement = `${field_name} = ${field_value}`;
-      where_sql_statements.push(where_sql_statement);
+      if (field_name != 'deleted') {
+        let field_value = field_values[field_name];
+        let where_sql_statement = `${field_name} = ${field_value}`;
+        where_sql_statements.push(where_sql_statement);
+      }
     });
     where_sql_statements.push(`user_id = '${this.getUserId()}'`);
     let where_sql = '';
@@ -506,7 +503,7 @@ export default class RunWay {
       let value = this.formatFieldValueForSql(Record[field_name], type);
       field_values[field_name] = value;
     });
-    field_values.deleted = (typeof Record.deleted === 'number') ? Record.deleted : 0;
+    field_values.deleted = (typeof Record.deleted === 'undefined') ? 0 : Number(Record.deleted);
 
     return field_values;
   }

@@ -120,7 +120,6 @@ describe('Syncer', function(done) {
     runway.saveRecords(test_records, 'Exercise')
     .then(() => {
       syncer.syncUp();
-      syncer.syncUp();
       return runway.saveRecord(additional_record, 'Exercise');
     })
     .then(() => {
